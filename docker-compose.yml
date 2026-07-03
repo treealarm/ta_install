@@ -1,0 +1,398 @@
+# Standalone product deployment: own `redis`, own (default, isolated) docker network, no
+# `profiles:` gating — every service starts on a plain `docker compose up`, independent of
+# Square/multitenant_admin. Pulls prebuilt `treealarm/...` images published by
+# scripts/push-images.sh (built by scripts/build-images.sh from sibling vms_rec / video_a
+# checkouts). Square integration stays off by default (KEYCLOAK_URL,
+# SQUARE_INTEGRATION_SINK_APP_ID empty in .env) per vms_rec CLAUDE.md's env-gating rule.
+x-data-volume: &data-volume
+  - ./data:/data
+
+services:
+  dapr-placement:
+    image: daprio/dapr:latest
+    command: ["./placement", "-port", "50005"]
+    ports:
+      - "50005:50005"
+
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+      POSTGRES_DB: "${POSTGRES_CFG_DB:-ta_cfg}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+      - ./init_files/postgres:/docker-entrypoint-initdb.d:ro
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@admin.com}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:-admin123}"
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - ./data/pgadmin:/var/lib/pgadmin
+      - ./init_files/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - postgres
+
+  redis:
+    image: redis:latest
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    ports:
+      - "8889:8889"
+      - "8554:8554"
+      - "8000:8000"
+      - "8189:8189/udp"
+    volumes:
+      - ./init_files/config/mediamtx.yml:/mediamtx.yml
+
+  vmsutils:
+    image: treealarm/vmsutils:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmsutils
+    volumes: *data-volume
+
+  vmsutils-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsutils"
+      - "-app-port"
+      - "${UTILS_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsutils"
+    depends_on:
+      - vmsutils
+      - redis
+
+  vmslogger:
+    image: treealarm/vmslogger:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmslogger
+    volumes: *data-volume
+
+  vmslogger-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmslogger"
+      - "-app-port"
+      - "${LOGGER_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmslogger"
+    depends_on:
+      - vmslogger
+      - redis
+
+  vmscfg:
+    image: treealarm/vmscfg:latest
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      APP_ID: vmscfg
+    depends_on:
+      - postgres
+
+  vmscfg-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmscfg"
+      - "-app-port"
+      - "${CFG_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmscfg"
+    depends_on:
+      - vmscfg
+      - redis
+
+  vmsonvif:
+    image: treealarm/vmsonvif:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmsonvif
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes: *data-volume
+    depends_on:
+      - vmscfg
+
+  vmsonvif-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsonvif"
+      - "-app-port"
+      - "${ONVIF_SRV_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-placement-host-address"
+      - "host.docker.internal:50005"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsonvif"
+    depends_on:
+      - vmsonvif
+      - redis
+
+  vmsonvif-actors:
+    image: treealarm/vmsonvif-actors:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmsonvif-actors
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes: *data-volume
+    depends_on:
+      - vmscfg
+
+  vmsonvif-actors-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsonvif-actors"
+      - "-app-port"
+      - "${ONVIF_ACTORS_PORT}"
+      - "-app-protocol"
+      - "http"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+      - "-placement-host-address"
+      - "host.docker.internal:50005"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsonvif-actors"
+    depends_on:
+      - vmsonvif-actors
+
+  vmsfs:
+    image: treealarm/vmsfs:latest
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      APP_ID: vmsfs
+    volumes: *data-volume
+    depends_on:
+      - postgres
+
+  vmsfs-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsfs"
+      - "-app-port"
+      - "${FS_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsfs"
+    depends_on:
+      - vmsfs
+      - redis
+
+  vmsanalytics:
+    image: treealarm/vmsanalytics:latest
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      APP_ID: vmsanalytics
+    volumes: *data-volume
+    depends_on:
+      - postgres
+      - vmscfg
+
+  vmsanalytics-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsanalytics"
+      - "-app-port"
+      - "${ANALYTICS_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsanalytics"
+    depends_on:
+      - vmsanalytics
+      - redis
+
+  # video_a analytics worker — stateless RTSP/OpenVINO engine: crops travel in the detection
+  # events and are persisted by vmsanalytics onto the shared data volume, so the worker itself
+  # only needs the models volume.
+  analytics-worker:
+    image: treealarm/analytics-worker:latest
+    environment:
+      ANALYTICS_GRPC_PORT: "50060"
+      ANALYTICS_MODEL_PATH: /models
+      ANALYTICS_DEVICE: CPU
+      ANALYTICS_STUB_SYNTHETIC_DETECTIONS: "false"
+    volumes:
+      - ./models:/models:ro
+
+  analytics-worker-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "analytics-worker"
+      - "-app-port"
+      - "50060"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:analytics-worker"
+    depends_on:
+      - analytics-worker
+
+  vms:
+    image: treealarm/vms:latest
+    ports:
+      - "${GRPC_VMS_PORT}:${GRPC_VMS_PORT}"
+    env_file:
+      - .env
+    environment:
+      APP_ID: vms
+    volumes: *data-volume
+    depends_on:
+      - vmscfg
+      - vmsonvif
+      - vmsfs
+      - mediamtx
+
+  vms-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vms"
+      - "-app-port"
+      - "${GRPC_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vms"
+    depends_on:
+      - vms
+      - redis
+
+  web_vms:
+    image: treealarm/web_vms:latest
+    ports:
+      - "${WEB_VMS_PORT}:${WEB_VMS_PORT}"
+    env_file:
+      - .env
+    depends_on:
+      - vms
+      - vmscfg
+      - vmsfs
+
+  web_vms-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "web-vms"
+      - "-app-port"
+      - "${WEB_VMS_PORT}"
+      - "-app-protocol"
+      - "http"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:web_vms"
+    depends_on:
+      - web_vms
+      - redis
