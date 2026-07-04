@@ -24,11 +24,24 @@ else
 fi
 
 # 2. All vms_rec services (produces vms_rec-* images via the dev compose build definitions).
+#    Built one at a time, not `compose build`'s default parallel mode: a parallel build peaks
+#    higher on memory (e.g. linking the C++ `vms` target alongside a `web_vms` dotnet build can
+#    exceed a resource-limited Docker VM), so serialize to keep peak usage down.
 echo "=== Building vms_rec services ==="
-docker compose -f "$VMS_REC_DIR/docker-compose.yml" --profile app build
+BUILDABLE_SERVICES=$(docker compose -f "$VMS_REC_DIR/docker-compose.yml" --profile app config 2>/dev/null | python3 -c "
+import sys, yaml
+d = yaml.safe_load(sys.stdin)
+for name, svc in d.get('services', {}).items():
+    if 'build' in svc:
+        print(name)
+")
+for svc in $BUILDABLE_SERVICES; do
+    echo "--- Building $svc ---"
+    docker compose -f "$VMS_REC_DIR/docker-compose.yml" --profile app build "$svc"
+done
 
-# 3. video_a analytics worker (self-contained vcpkg/OpenVINO build — the first run takes a long
-#    time; the Dockerfile builds with -j1 on purpose, the static OpenVINO link is memory-heavy).
+# 3. video_a analytics worker — its Dockerfile builds FROM vms-deps (step 1), so this only
+#    compiles video_a's own small source tree, not protobuf/grpc/spdlog/ffmpeg/openvino again.
 echo "=== Building analytics-worker ==="
 docker build -t analytics-worker "$VIDEO_A_DIR"
 

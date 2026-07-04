@@ -44,7 +44,6 @@ services:
 
   mediamtx:
     image: bluenviron/mediamtx:latest
-    container_name: mediamtx
     ports:
       - "8889:8889"
       - "8554:8554"
@@ -291,17 +290,14 @@ services:
       - redis
 
   # video_a analytics worker — stateless RTSP/OpenVINO engine: crops travel in the detection
-  # events and are persisted by vmsanalytics onto the shared data volume, so the worker itself
-  # only needs the models volume.
+  # events and are persisted by vmsanalytics onto the shared data volume. Models are baked into
+  # the image (see video_a/Dockerfile), no volume needed.
   analytics-worker:
     image: treealarm/analytics-worker:latest
     environment:
       ANALYTICS_GRPC_PORT: "50060"
-      ANALYTICS_MODEL_PATH: /models
       ANALYTICS_DEVICE: CPU
       ANALYTICS_STUB_SYNTHETIC_DETECTIONS: "false"
-    volumes:
-      - ./models:/models:ro
 
   analytics-worker-dapr:
     image: "daprio/daprd:latest"

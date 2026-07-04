@@ -10,7 +10,6 @@ last published with `scripts/push-images.sh` — no source checkouts are needed 
 ## Run it
 
 ```sh
-models/fetch-models.sh          # once: download the analytics models (see below)
 docker compose --env-file .env up -d
 ```
 
@@ -29,13 +28,17 @@ Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars 
 
 ## Analytics models
 
-The worker mounts `./models` at `/models`:
+Baked into the `analytics-worker` image at build time (see `video_a/Dockerfile` and
+`video_a/models/`) — nothing to fetch or mount, works out of the box:
 
-- `face_detector.xml/.bin` — downloaded by `models/fetch-models.sh` (OMZ face-detection-0205,
-  Apache-2.0).
-- `primary_detector.xml/.bin` (person/vehicle, YOLOv8-style OpenVINO export) — not redistributed
-  here for licensing reasons; export it yourself (see the comment in `models/fetch-models.sh`)
-  and copy the files in. Without it, person/vehicle detection runs in stub mode.
+- `face_detector.xml/.bin` — OMZ face-detection-0205, Apache-2.0.
+- `primary_detector.xml/.bin` (person/vehicle) — a YOLOv8n OpenVINO export. **Licensing note:**
+  Ultralytics YOLOv8 is AGPL-3.0. Baking its weights into an image that gets deployed to
+  customers over a network is a conscious, deliberate call made for now to get a working turnkey
+  deploy — it has not been reconciled with AGPL's network-use clause (which can require
+  open-sourcing the whole product, or an Ultralytics Enterprise license for closed distribution).
+  Revisit before any real customer rollout: either clear the licensing properly or swap in a
+  permissively-licensed detector.
 
 ## Adding a camera
 

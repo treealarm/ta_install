@@ -1,10 +1,5 @@
 # Runtime state of a deployment (recordings, crops, postgres, pgadmin)
 /data/
 
-# Analytics models are fetched/exported, not versioned (see models/fetch-models.sh)
-/models/*.xml
-/models/*.bin
-/models/*.onnx
-
 # Per-installation overrides
 .env.local
