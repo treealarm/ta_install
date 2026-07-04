@@ -10,3 +10,10 @@ spec:
     value: redis:6379
   - name: redisPassword
     value: ""
+  # Headroom over the default 10-connection redis client pool. Pool exhaustion ("redis:
+  # connection pool timeout" spiraling in a sidecar) was observed live when an app resubscribed
+  # its streaming subscriptions in a loop, stacking consumers — the real fix is subscribe-once
+  # on the app side (see VmsOnvif.CameraConfigSubscriber), this just keeps normal multi-topic
+  # load far from the limit.
+  - name: poolSize
+    value: "64"
