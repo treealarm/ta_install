@@ -7,28 +7,28 @@ set -euo pipefail
 export DOCKER_BUILDKIT=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VMS_REC_DIR="${VMS_REC_DIR:-$SCRIPT_DIR/../../vms_rec}"
+TA_VMS_DIR="${TA_VMS_DIR:-$SCRIPT_DIR/../../ta_vms}"
 VIDEO_A_DIR="${VIDEO_A_DIR:-$SCRIPT_DIR/../../video_a}"
 
-for dir in "$VMS_REC_DIR" "$VIDEO_A_DIR"; do
-    [ -d "$dir" ] || { echo "Source checkout not found: $dir (set VMS_REC_DIR/VIDEO_A_DIR)"; exit 1; }
+for dir in "$TA_VMS_DIR" "$VIDEO_A_DIR"; do
+    [ -d "$dir" ] || { echo "Source checkout not found: $dir (set TA_VMS_DIR/VIDEO_A_DIR)"; exit 1; }
 done
 
 # 1. Base image with prebuilt C++ deps for media_server — only when missing (it's huge and
 #    changes rarely; `docker rmi vms-deps` to force a rebuild).
 if ! docker image inspect vms-deps &>/dev/null; then
     echo "=== Building vms-deps ==="
-    docker build -t vms-deps "$VMS_REC_DIR/vms-deps"
+    docker build -t vms-deps "$TA_VMS_DIR/vms-deps"
 else
     echo "=== vms-deps already exists, skipping ==="
 fi
 
-# 2. All vms_rec services (produces vms_rec-* images via the dev compose build definitions).
+# 2. All ta_vms services (produces ta_vms-* images via the dev compose build definitions).
 #    Built one at a time, not `compose build`'s default parallel mode: a parallel build peaks
 #    higher on memory (e.g. linking the C++ `vms` target alongside a `web_vms` dotnet build can
 #    exceed a resource-limited Docker VM), so serialize to keep peak usage down.
-echo "=== Building vms_rec services ==="
-BUILDABLE_SERVICES=$(docker compose -f "$VMS_REC_DIR/docker-compose.yml" --profile app config 2>/dev/null | python3 -c "
+echo "=== Building ta_vms services ==="
+BUILDABLE_SERVICES=$(docker compose -f "$TA_VMS_DIR/docker-compose.yml" --profile app config 2>/dev/null | python3 -c "
 import sys, yaml
 d = yaml.safe_load(sys.stdin)
 for name, svc in d.get('services', {}).items():
@@ -37,7 +37,7 @@ for name, svc in d.get('services', {}).items():
 ")
 for svc in $BUILDABLE_SERVICES; do
     echo "--- Building $svc ---"
-    docker compose -f "$VMS_REC_DIR/docker-compose.yml" --profile app build "$svc"
+    docker compose -f "$TA_VMS_DIR/docker-compose.yml" --profile app build "$svc"
 done
 
 # 3. video_a analytics worker — its Dockerfile builds FROM vms-deps (step 1), so this only

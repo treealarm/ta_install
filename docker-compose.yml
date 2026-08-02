@@ -1,9 +1,9 @@
 # Standalone product deployment: own `redis`, own (default, isolated) docker network, no
 # `profiles:` gating — every service starts on a plain `docker compose up`, independent of
 # Square/multitenant_admin. Pulls prebuilt `treealarm/...` images published by
-# scripts/push-images.sh (built by scripts/build-images.sh from sibling vms_rec / video_a
+# scripts/push-images.sh (built by scripts/build-images.sh from sibling ta_vms / video_a
 # checkouts). Square integration stays off by default (KEYCLOAK_URL,
-# SQUARE_INTEGRATION_SINK_APP_ID empty in .env) per vms_rec CLAUDE.md's env-gating rule.
+# SQUARE_INTEGRATION_SINK_APP_ID empty in .env) per ta_vms CLAUDE.md's env-gating rule.
 x-data-volume: &data-volume
   - ./data:/data
 

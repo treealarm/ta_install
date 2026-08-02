@@ -1,7 +1,7 @@
 {
   "Servers": {
     "1": {
-      "Name": "vms_rec postgres",
+      "Name": "ta_vms postgres",
       "Group": "Servers",
       "Host": "postgres",
       "Port": 5432,

@@ -1,6 +1,6 @@
 # ta_install
 
-Standalone product deployment for the TreeAlarm VMS: the `vms_rec` services plus the `video_a`
+Standalone product deployment for the TreeAlarm VMS: the `ta_vms` services plus the `video_a`
 analytics worker, packaged as one docker-compose stack. Self-contained — its own Redis, its own
 (isolated, default) docker network, no dependency on the `Square`/`multitenant_admin` stack.
 
@@ -55,11 +55,11 @@ classes), then arm the camera.
 
 ## Building and publishing images
 
-Requires sibling source checkouts (`../vms_rec`, `../video_a`; override with
-`VMS_REC_DIR`/`VIDEO_A_DIR`):
+Requires sibling source checkouts (`../ta_vms`, `../video_a`; override with
+`TA_VMS_DIR`/`VIDEO_A_DIR`):
 
 ```sh
-scripts/build-images.sh         # vms-deps (once) + all vms_rec services + analytics-worker
+scripts/build-images.sh         # vms-deps (once) + all ta_vms services + analytics-worker
 docker login                    # or export DOCKER_USER + DOCKER_TOKEN
 scripts/push-images.sh          # tag treealarm/* and push
 ```

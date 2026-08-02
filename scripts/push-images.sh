@@ -15,16 +15,16 @@ fi
 
 # local image -> remote image
 declare -a PAIRS=(
-    "vms_rec-vmsutils:latest         $NAMESPACE/vmsutils:latest"
-    "vms_rec-vmslogger:latest        $NAMESPACE/vmslogger:latest"
-    "vms_rec-vmscfg:latest           $NAMESPACE/vmscfg:latest"
-    "vms_rec-vmsonvif:latest         $NAMESPACE/vmsonvif:latest"
-    "vms_rec-vmsonvif-actors:latest  $NAMESPACE/vmsonvif-actors:latest"
-    "vms_rec-vmsfs:latest            $NAMESPACE/vmsfs:latest"
-    "vms_rec-vmsanalytics:latest     $NAMESPACE/vmsanalytics:latest"
-    "vms_rec-vms:latest              $NAMESPACE/vms:latest"
-    "vms_rec-web_vms:latest          $NAMESPACE/web_vms:latest"
-    "analytics-worker:latest         $NAMESPACE/analytics-worker:latest"
+    "ta_vms-vmsutils:latest        $NAMESPACE/vmsutils:latest"
+    "ta_vms-vmslogger:latest       $NAMESPACE/vmslogger:latest"
+    "ta_vms-vmscfg:latest          $NAMESPACE/vmscfg:latest"
+    "ta_vms-vmsonvif:latest        $NAMESPACE/vmsonvif:latest"
+    "ta_vms-vmsonvif-actors:latest $NAMESPACE/vmsonvif-actors:latest"
+    "ta_vms-vmsfs:latest           $NAMESPACE/vmsfs:latest"
+    "ta_vms-vmsanalytics:latest    $NAMESPACE/vmsanalytics:latest"
+    "ta_vms-vms:latest             $NAMESPACE/vms:latest"
+    "ta_vms-web_vms:latest         $NAMESPACE/web_vms:latest"
+    "analytics-worker:latest      $NAMESPACE/analytics-worker:latest"
 )
 
 for pair in "${PAIRS[@]}"; do
