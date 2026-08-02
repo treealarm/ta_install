@@ -12,3 +12,10 @@ spec:
     value: ""
   - name: actorStateStore
     value: "true"
+  # Dapr's default is keyPrefix=appid, which silently namespaces every key by the writer's app id:
+  # media_server writes "vms||ms-status-<id>" while VmsCfg reads "vmscfg||ms-status-<id>", and the
+  # same split made web_vms blind to VmsCfg's permission version key. These keys are deliberately
+  # shared between services, so the store is keyed by the component name instead — one namespace
+  # per state store, not per app.
+  - name: keyPrefix
+    value: "name"

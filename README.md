@@ -27,6 +27,16 @@ come up together. The first start takes longer while images are pulled.
 Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars are empty in
 `.env`, so the UI runs with no login screen and no push to Square.
 
+## Before a real deployment
+
+`.env` ships working defaults so the stack starts unattended. Replace these:
+
+- `VMS_MEDIAMTX_PUBLISH_PASS` / `VMS_MEDIAMTX_READ_PASS` — anyone with them can pull or overwrite
+  any camera stream straight from MediaMTX.
+- `VMS_WHEP_SESSION_KEY` — seals the WHEP session tokens handed to browsers;
+  `openssl rand -base64 32` (must decode to 32 bytes).
+- `POSTGRES_PASSWORD`.
+
 ## Analytics models
 
 Baked into the `analytics-worker` image at build time (see `video_a/Dockerfile` and
