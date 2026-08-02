@@ -20,7 +20,9 @@ come up together. The first start takes longer while images are pulled.
 
 - Web UI: `http://localhost:5134` (`WEB_VMS_PORT` in `.env`)
 - pgAdmin: `http://localhost:5050` (`admin@admin.com` / `admin123` by default)
-- MediaMTX: RTSP `8554`, WebRTC `8889`, HLS `8000`
+- MediaMTX: RTSP `8554`, WebRTC signalling `8889`, WebRTC media `8189/udp` — that last one goes
+  straight to the browser, so live video will not play if it is blocked. MediaMTX's own HLS
+  (`8888`) is deliberately not published: archive HLS is served by the gateway on `5134`.
 - Video analytics: person/vehicle + face detection with crops in the Events gallery
 
 Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars are empty in
@@ -32,13 +34,18 @@ Baked into the `analytics-worker` image at build time (see `video_a/Dockerfile` 
 `video_a/models/`) — nothing to fetch or mount, works out of the box:
 
 - `face_detector.xml/.bin` — OMZ face-detection-0205, Apache-2.0.
-- `primary_detector.xml/.bin` (person/vehicle) — a YOLOv8n OpenVINO export. **Licensing note:**
-  Ultralytics YOLOv8 is AGPL-3.0. Baking its weights into an image that gets deployed to
+- `primary_detector.xml/.bin` (person/vehicle) — a YOLO11n OpenVINO export. **Licensing note:**
+  Ultralytics YOLO11 is AGPL-3.0. Baking its weights into an image that gets deployed to
   customers over a network is a conscious, deliberate call made for now to get a working turnkey
   deploy — it has not been reconciled with AGPL's network-use clause (which can require
   open-sourcing the whole product, or an Ultralytics Enterprise license for closed distribution).
   Revisit before any real customer rollout: either clear the licensing properly or swap in a
   permissively-licensed detector.
+- `person_embedder.onnx/.xml` (OPTIONAL) — an OSNet body ReID model (256×128 input, 512-d output),
+  used for cross-camera / cross-gap object re-identification that drives event grouping. **Not
+  bundled** — drop it into `video_a/models/` to enable body re-id. When absent, the worker logs
+  "body re-id disabled" and simply emits no embedding; analytics still works, but each detection
+  gets its own (per-track) object id and events group only within a single track.
 
 ## Adding a camera
 

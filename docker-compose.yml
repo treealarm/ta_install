@@ -44,11 +44,16 @@ services:
 
   mediamtx:
     image: bluenviron/mediamtx:latest
+    # Passwords for the vms_publish / vms_read accounts declared in mediamtx.yml. MediaMTX merges
+    # these into the yml entries by index, so the file keeps the users and permissions while the
+    # secrets stay in .env. Both ports below now require one of those accounts.
+    environment:
+      MTX_AUTHINTERNALUSERS_0_PASS: "${VMS_MEDIAMTX_PUBLISH_PASS}"
+      MTX_AUTHINTERNALUSERS_1_PASS: "${VMS_MEDIAMTX_READ_PASS}"
     ports:
-      - "8889:8889"
-      - "8554:8554"
-      - "8000:8000"
-      - "8189:8189/udp"
+      - "8889:8889"       # WHEP signaling — only the web_vms gateway should use it
+      - "8554:8554"       # RTSP
+      - "8189:8189/udp"  # ICE/UDP media, goes straight to the browser
     volumes:
       - ./init_files/config/mediamtx.yml:/mediamtx.yml
 
