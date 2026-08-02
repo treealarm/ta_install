@@ -19,7 +19,6 @@ come up together. The first start takes longer while images are pulled.
 ## What you get
 
 - Web UI: `http://localhost:5134` (`WEB_VMS_PORT` in `.env`)
-- pgAdmin: `http://localhost:5050` (`admin@admin.com` / `admin123` by default)
 - MediaMTX: RTSP `8554`, WebRTC signalling `8889`, WebRTC media `8189/udp` — that last one goes
   straight to the browser, so live video will not play if it is blocked. MediaMTX's own HLS
   (`8888`) is deliberately not published: archive HLS is served by the gateway on `5134`.

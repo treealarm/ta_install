@@ -8,11 +8,11 @@ x-data-volume: &data-volume
   - ./data:/data
 
 services:
+  # Actor placement. Reached by service name over the compose network, not through a published
+  # host port: publishing 50005 collides with a `dapr init` placement on the deployment host.
   dapr-placement:
     image: daprio/dapr:latest
     command: ["./placement", "-port", "50005"]
-    ports:
-      - "50005:50005"
 
   postgres:
     image: postgres:latest
@@ -25,19 +25,6 @@ services:
     volumes:
       - ./data/postgres:/var/lib/postgresql
       - ./init_files/postgres:/docker-entrypoint-initdb.d:ro
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    environment:
-      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@admin.com}"
-      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:-admin123}"
-    ports:
-      - "${PGADMIN_PORT:-5050}:80"
-    volumes:
-      - ./data/pgadmin:/var/lib/pgadmin
-      - ./init_files/pgadmin/servers.json:/pgadmin4/servers.json:ro
-    depends_on:
-      - postgres
 
   redis:
     image: redis:latest
@@ -179,7 +166,7 @@ services:
       - "-dapr-grpc-port"
       - "50001"
       - "-placement-host-address"
-      - "host.docker.internal:50005"
+      - "dapr-placement:50005"
       - "-components-path"
       - "/components"
     volumes:
@@ -218,7 +205,7 @@ services:
       - "-components-path"
       - "/components"
       - "-placement-host-address"
-      - "host.docker.internal:50005"
+      - "dapr-placement:50005"
     volumes:
       - ./init_files/dapr_components:/components
     network_mode: "service:vmsonvif-actors"
