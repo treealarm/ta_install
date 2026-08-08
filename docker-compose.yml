@@ -145,6 +145,9 @@ services:
       - .env
     environment:
       APP_ID: vmsonvif
+      # The node whose camera subnet this instance shares. Must match the server_id side of
+      # this node's MEDIA_SERVER_PAIRS entry: ONVIF only reaches a camera from its own node.
+      OWN_SERVER_ID: vms
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes: *data-volume
@@ -182,6 +185,9 @@ services:
       - .env
     environment:
       APP_ID: vmsonvif-actors
+      # The node whose camera subnet this instance shares. Must match the server_id side of
+      # this node's MEDIA_SERVER_PAIRS entry: ONVIF only reaches a camera from its own node.
+      OWN_SERVER_ID: vms
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes: *data-volume
