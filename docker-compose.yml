@@ -324,24 +324,24 @@ services:
       - vmsfs
       - redis
 
-  vmsanalytics:
-    image: treealarm/vmsanalytics:latest
+  vmsanalyticssingleton:
+    image: treealarm/vmsanalyticssingleton:latest
     env_file:
       - .env
     environment:
       POSTGRES_HOST: postgres
-      APP_ID: vmsanalytics
+      APP_ID: vmsanalyticssingleton
     volumes: *data-volume
     depends_on:
       - postgres
       - vmscfg
 
-  vmsanalytics-dapr:
+  vmsanalyticssingleton-dapr:
     image: "daprio/daprd:latest"
     command:
       - "./daprd"
       - "-app-id"
-      - "vmsanalytics"
+      - "vmsanalyticssingleton"
       - "-app-port"
       - "${ANALYTICS_VMS_PORT}"
       - "-app-protocol"
@@ -354,13 +354,13 @@ services:
       - "/components"
     volumes:
       - ./init_files/dapr_components:/components
-    network_mode: "service:vmsanalytics"
+    network_mode: "service:vmsanalyticssingleton"
     depends_on:
-      - vmsanalytics
+      - vmsanalyticssingleton
       - redis
 
   # video_a analytics worker — stateless RTSP/OpenVINO engine: crops travel in the detection
-  # events and are persisted by vmsanalytics onto the shared data volume. Models are baked into
+  # events and are persisted by vmsanalyticssingleton onto the shared data volume. Models are baked into
   # the image (see video_a/Dockerfile), no volume needed.
   analytics-worker:
     image: treealarm/analytics-worker:latest

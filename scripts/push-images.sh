@@ -23,7 +23,7 @@ declare -a PAIRS=(
     "ta_vms-vmsonvif:latest        $NAMESPACE/vmsonvif:latest"
     "ta_vms-vmsonvif-actors:latest $NAMESPACE/vmsonvif-actors:latest"
     "ta_vms-vmsfs:latest           $NAMESPACE/vmsfs:latest"
-    "ta_vms-vmsanalytics:latest    $NAMESPACE/vmsanalytics:latest"
+    "ta_vms-vmsanalyticssingleton:latest    $NAMESPACE/vmsanalyticssingleton:latest"
     "ta_vms-vms:latest             $NAMESPACE/vms:latest"
     "ta_vms-web_vms:latest         $NAMESPACE/web_vms:latest"
     "analytics-worker:latest      $NAMESPACE/analytics-worker:latest"
