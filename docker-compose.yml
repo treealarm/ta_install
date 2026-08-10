@@ -79,6 +79,43 @@ services:
       - vmssingleton
       - redis
 
+  vmssquaresingleton:
+    image: treealarm/vmssquaresingleton:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmssquaresingleton
+    # Exactly one instance: its startup resync pushes every camera into Square, and a second copy
+    # would push the whole tree again. See CLAUDE.md.
+    volumes: *data-volume
+    depends_on:
+      - vmscfg
+
+  vmssquaresingleton-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmssquaresingleton"
+      - "-app-port"
+      - "${SQUARE_SINGLETON_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-placement-host-address"
+      - "dapr-placement:50005"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmssquaresingleton"
+    depends_on:
+      - vmssquaresingleton
+      - redis
+
   vmsutils:
     image: treealarm/vmsutils:latest
     env_file:

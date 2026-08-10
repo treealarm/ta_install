@@ -17,6 +17,7 @@ fi
 declare -a PAIRS=(
     "ta_vms-vmsutils:latest        $NAMESPACE/vmsutils:latest"
     "ta_vms-vmssingleton:latest    $NAMESPACE/vmssingleton:latest"
+    "ta_vms-vmssquaresingleton:latest $NAMESPACE/vmssquaresingleton:latest"
     "ta_vms-vmslogger:latest       $NAMESPACE/vmslogger:latest"
     "ta_vms-vmscfg:latest          $NAMESPACE/vmscfg:latest"
     "ta_vms-vmsonvif:latest        $NAMESPACE/vmsonvif:latest"
