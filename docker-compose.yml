@@ -44,6 +44,41 @@ services:
     volumes:
       - ./init_files/config/mediamtx.yml:/mediamtx.yml
 
+  vmssingleton:
+    image: treealarm/vmssingleton:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmssingleton
+    # Exactly one instance, always — see CLAUDE.md. It runs work that must not happen twice and
+    # aggregates pub/sub reports in memory, which a second replica would split rather than share.
+    volumes: *data-volume
+
+  vmssingleton-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmssingleton"
+      - "-app-port"
+      - "${SINGLETON_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-placement-host-address"
+      - "dapr-placement:50005"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmssingleton"
+    depends_on:
+      - vmssingleton
+      - redis
+
   vmsutils:
     image: treealarm/vmsutils:latest
     env_file:
