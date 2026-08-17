@@ -22,9 +22,37 @@ services:
       POSTGRES_DB: "${POSTGRES_CFG_DB:-ta_cfg}"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    # No docker-entrypoint-initdb.d mount: that hook fires only when the data directory is
+    # initialised from empty, so on every installation past the first — which is every
+    # installation that has ever recorded anything — a database added later would never be
+    # created, silently. The db-init service below is the single thing that creates them, on
+    # every start, and it reads their names from .env instead of a hardcoded list.
     volumes:
       - ./data/postgres:/var/lib/postgresql
-      - ./init_files/postgres:/docker-entrypoint-initdb.d:ro
+
+  # Creates the service databases (see the comment on postgres above) and cross-checks the Dapr
+  # components against .env. Runs to completion and exits; idempotent, so repeating it on every
+  # `docker compose up` costs nothing. Can also be run on its own:
+  #   docker compose run --rm db-init            # create what is missing
+  #   docker compose run --rm db-init --check    # report only, create nothing
+  db-init:
+    image: postgres:latest
+    env_file:
+      - .env
+    volumes:
+      - ./scripts:/init:ro
+      # Read-only, and only to compare: the state store's connection string is a literal (Dapr
+      # does not expand environment variables in component metadata), so it is the one place
+      # where the database name and credentials are duplicated. Changing POSTGRES_PASSWORD in
+      # .env alone would otherwise surface as a state store that quietly never worked.
+      - ./init_files/dapr_components:/components:ro
+    # Invoked through bash rather than executed directly: the exec bit does not survive a bind
+    # mount from a Windows host.
+    entrypoint: ["bash", "/init/prepare-databases.sh"]
+    working_dir: /init
+    restart: "no"
+    depends_on:
+      - postgres
 
   redis:
     image: redis:latest
@@ -53,6 +81,15 @@ services:
     # Exactly one instance, always — see CLAUDE.md. It runs work that must not happen twice and
     # aggregates pub/sub reports in memory, which a second replica would split rather than share.
     volumes: *data-volume
+    # Waits for db-init even though this service has no database of its own: its Dapr sidecar
+    # loads every component in /components, including the PostgreSQL state store, and daprd
+    # exits when a component fails to initialise (spec.ignoreErrors is false by default) — it
+    # does not retry. Started before the state database exists, the sidecar would simply die.
+    # Sidecars inherit this wait through their depends_on on the app, so the rule is: every app
+    # service waits for db-init, directly or through another service that does.
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
   vmssingleton-dapr:
     image: "daprio/daprd:latest"
@@ -123,6 +160,10 @@ services:
     environment:
       APP_ID: vmsutils
     volumes: *data-volume
+    # For its sidecar's state store component, not for itself — see vmssingleton above.
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
   vmsutils-dapr:
     image: "daprio/daprd:latest"
@@ -154,6 +195,10 @@ services:
     environment:
       APP_ID: vmslogger
     volumes: *data-volume
+    # For its sidecar's state store component, not for itself — see vmssingleton above.
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
   vmslogger-dapr:
     image: "daprio/daprd:latest"
@@ -185,8 +230,14 @@ services:
     environment:
       POSTGRES_HOST: postgres
       APP_ID: vmscfg
+    # Waits for db-init to finish, not just for postgres to be up: without its database this
+    # service now fails fast with a message naming it instead of retrying forever, so starting
+    # it early would turn a working installation into a crash loop.
     depends_on:
-      - postgres
+      postgres:
+        condition: service_started
+      db-init:
+        condition: service_completed_successfully
 
   vmscfg-dapr:
     image: "daprio/daprd:latest"
@@ -298,8 +349,12 @@ services:
       POSTGRES_HOST: postgres
       APP_ID: vmsfs
     volumes: *data-volume
+    # See vmscfg: waits for the database to exist, not merely for the server to be up.
     depends_on:
-      - postgres
+      postgres:
+        condition: service_started
+      db-init:
+        condition: service_completed_successfully
 
   vmsfs-dapr:
     image: "daprio/daprd:latest"
@@ -332,9 +387,14 @@ services:
       POSTGRES_HOST: postgres
       APP_ID: vmsanalyticssingleton
     volumes: *data-volume
+    # See vmscfg: waits for the database to exist, not merely for the server to be up.
     depends_on:
-      - postgres
-      - vmscfg
+      postgres:
+        condition: service_started
+      db-init:
+        condition: service_completed_successfully
+      vmscfg:
+        condition: service_started
 
   vmsanalyticssingleton-dapr:
     image: "daprio/daprd:latest"
@@ -369,6 +429,10 @@ services:
       ANALYTICS_DEVICE: CPU
       ANALYTICS_REID_EMBED_INTERVAL_SEC: "${ANALYTICS_REID_EMBED_INTERVAL_SEC}"
       ANALYTICS_STUB_SYNTHETIC_DETECTIONS: "false"
+    # For its sidecar's state store component, not for itself — see vmssingleton above.
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
   analytics-worker-dapr:
     image: "daprio/daprd:latest"

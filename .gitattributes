@@ -1,0 +1,31 @@
+###############################################################################
+# Line endings.
+#
+# Files here are bind-mounted straight from the working tree into Linux
+# containers, so a Windows checkout must not turn them into CRLF:
+#
+#   scripts/*.sh          -> ./scripts:/init in the db-init service. With CRLF,
+#                            "set -euo pipefail" itself fails ("invalid option
+#                            name"), so none of -e/-u/-o take effect, every psql
+#                            call fails unnoticed, and the script still exits 0 —
+#                            compose reads that as service_completed_successfully
+#                            and starts the services against databases that were
+#                            never created.
+#   *.yaml/*.yml, .env    -> dapr components, mediamtx.yml, compose env files.
+#
+# .ps1/.cmd go the other way: Windows is the only thing that runs them.
+###############################################################################
+* text=auto
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.sql       text eol=lf
+.env        text eol=lf
+.env.*      text eol=lf
+Dockerfile  text eol=lf
+Dockerfile.* text eol=lf
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf

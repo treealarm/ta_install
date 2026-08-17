@@ -35,7 +35,23 @@ Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars 
   any camera stream straight from MediaMTX.
 - `VMS_WHEP_SESSION_KEY` — seals the WHEP session tokens handed to browsers;
   `openssl rand -base64 32` (must decode to 32 bytes).
-- `POSTGRES_PASSWORD`.
+- `POSTGRES_PASSWORD` — in **two** places: `.env` and the connection string in
+  `init_files/dapr_components/statestore.yaml`, which backs the Dapr state store. Dapr cannot read
+  environment variables in component metadata, so the component carries its own copy. Change one
+  and not the other and `db-init` stops the stack on the next start, naming the file.
+
+## Databases
+
+The `db-init` service creates them. It runs on every `docker compose up`, creates each database
+named by a `POSTGRES_*_DB` variable in `.env` that does not exist yet, cross-checks the Dapr
+components against `.env`, and exits; the services wait for it to finish. It is idempotent, so
+adding a service later means adding its `POSTGRES_<NAME>_DB` to `.env` and nothing else.
+
+To see what it would do without changing anything:
+
+```sh
+docker compose run --rm db-init --check
+```
 
 ## Analytics models
 

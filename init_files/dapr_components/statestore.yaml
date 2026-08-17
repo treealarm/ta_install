@@ -3,13 +3,28 @@ kind: Component
 metadata:
   name: statestore
 spec:
-  type: state.redis
+  # PostgreSQL, not the redis next door. State here outlives a restart — ONVIF observed topics,
+  # the media server heartbeat, the camera-permission version — while the redis service in this
+  # compose file has no volume at all, so anything left in it disappears with the container. The
+  # same postgres that already holds the archive metadata costs nothing extra and is backed up
+  # together with the rest of ./data.
+  #
+  # v1, not v2: v1 stores the value in a JSONB column. media_server writes its heartbeat as the
+  # quoted string "online" straight from C++ (not through a Dapr SDK), which is valid JSON and so
+  # survives; v2 stores values differently and has not been tested against that writer.
+  type: state.postgresql
   version: v1
   metadata:
-  - name: redisHost
-    value: redis:6379
-  - name: redisPassword
-    value: ""
+  # Literal, because Dapr does not expand environment variables in component metadata. That makes
+  # this the one place where values from .env are written down twice: the database name must match
+  # POSTGRES_STATE_DB (that variable is what makes db-init create it), and user/password must match
+  # POSTGRES_USER/POSTGRES_PASSWORD. Change them here too when you change them in .env — db-init
+  # compares the two copies and fails if they have drifted, so a mistake shows up as a startup
+  # failure instead of as a state store that quietly never worked.
+  - name: connectionString
+    value: "host=postgres port=5432 user=postgres password=postgres database=ta_state sslmode=disable"
+  # Required by vmsonvif-actors: without it the actor runtime refuses to start and every
+  # ONVIF/PTZ call fails.
   - name: actorStateStore
     value: "true"
   # Dapr's default is keyPrefix=appid, which silently namespaces every key by the writer's app id:
