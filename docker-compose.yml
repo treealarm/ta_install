@@ -1,4 +1,4 @@
-# Standalone product deployment: own `redis`, own (default, isolated) docker network, no
+# Standalone product deployment: own broker, own (default, isolated) docker network, no
 # `profiles:` gating — every service starts on a plain `docker compose up`, independent of
 # Square/multitenant_admin. Pulls prebuilt `treealarm/...` images published by
 # scripts/push-images.sh (built by scripts/build-images.sh from sibling ta_vms / video_a
@@ -54,8 +54,33 @@ services:
     depends_on:
       - postgres
 
-  redis:
-    image: redis:latest
+  # The Dapr pub/sub broker, in place of the redis that used to sit here. The state store already
+  # moved to the postgres above, so redis was left carrying only the bus — and it is the one
+  # broker with no native Windows build, which blocks the Docker-free installer that comes after
+  # Kubernetes on the roadmap. RabbitMQ serves all three the same way, and the bus semantics are
+  # unchanged: one durable queue per app id per topic, see init_files/dapr_components/orderpubsub.yaml.
+  rabbitmq:
+    image: rabbitmq:management
+    environment:
+      # The built-in "guest" account is refused from anywhere but localhost, so no sidecar in a
+      # container could use it. These must match the credentials in the orderpubsub component.
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER:-vms}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS:-vms}"
+    ports:
+      # Management UI only, and only on the loopback interface: it is an operator tool for looking
+      # at queues, not something to expose on a customer network. The AMQP port stays unpublished —
+      # every client is inside the compose network.
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      # Queues are durable and hold events across a subscriber restart; without a volume they
+      # would come back empty on every start.
+      - ./data/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
 
   mediamtx:
     image: bluenviron/mediamtx:latest
@@ -81,15 +106,18 @@ services:
     # Exactly one instance, always — see CLAUDE.md. It runs work that must not happen twice and
     # aggregates pub/sub reports in memory, which a second replica would split rather than share.
     volumes: *data-volume
-    # Waits for db-init even though this service has no database of its own: its Dapr sidecar
-    # loads every component in /components, including the PostgreSQL state store, and daprd
-    # exits when a component fails to initialise (spec.ignoreErrors is false by default) — it
-    # does not retry. Started before the state database exists, the sidecar would simply die.
-    # Sidecars inherit this wait through their depends_on on the app, so the rule is: every app
-    # service waits for db-init, directly or through another service that does.
+    # Waits for the infrastructure even though this service owns no database: its Dapr sidecar
+    # loads every component in /components — state store and pub/sub alike — and daprd exits when
+    # a component fails to initialise (spec.ignoreErrors is false by default), without retrying.
+    # Started before the state database exists or before the broker accepts connections, the
+    # sidecar would simply die. Sidecars inherit this wait through their depends_on on the app,
+    # so the rule is: every app service waits for db-init and rabbitmq, directly or through
+    # another service that does.
     depends_on:
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
   vmssingleton-dapr:
     image: "daprio/daprd:latest"
@@ -114,7 +142,6 @@ services:
     network_mode: "service:vmssingleton"
     depends_on:
       - vmssingleton
-      - redis
 
   vmssquaresingleton:
     image: treealarm/vmssquaresingleton:latest
@@ -151,7 +178,6 @@ services:
     network_mode: "service:vmssquaresingleton"
     depends_on:
       - vmssquaresingleton
-      - redis
 
   vmsutils:
     image: treealarm/vmsutils:latest
@@ -164,6 +190,8 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
   vmsutils-dapr:
     image: "daprio/daprd:latest"
@@ -186,7 +214,6 @@ services:
     network_mode: "service:vmsutils"
     depends_on:
       - vmsutils
-      - redis
 
   vmslogger:
     image: treealarm/vmslogger:latest
@@ -199,6 +226,8 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
   vmslogger-dapr:
     image: "daprio/daprd:latest"
@@ -221,7 +250,6 @@ services:
     network_mode: "service:vmslogger"
     depends_on:
       - vmslogger
-      - redis
 
   vmscfg:
     image: treealarm/vmscfg:latest
@@ -238,6 +266,8 @@ services:
         condition: service_started
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
   vmscfg-dapr:
     image: "daprio/daprd:latest"
@@ -260,7 +290,6 @@ services:
     network_mode: "service:vmscfg"
     depends_on:
       - vmscfg
-      - redis
 
   vmsonvif:
     image: treealarm/vmsonvif:latest
@@ -300,7 +329,6 @@ services:
     network_mode: "service:vmsonvif"
     depends_on:
       - vmsonvif
-      - redis
 
   vmsonvif-actors:
     image: treealarm/vmsonvif-actors:latest
@@ -355,6 +383,8 @@ services:
         condition: service_started
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
   vmsfs-dapr:
     image: "daprio/daprd:latest"
@@ -377,7 +407,6 @@ services:
     network_mode: "service:vmsfs"
     depends_on:
       - vmsfs
-      - redis
 
   vmsanalyticssingleton:
     image: treealarm/vmsanalyticssingleton:latest
@@ -393,6 +422,8 @@ services:
         condition: service_started
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
       vmscfg:
         condition: service_started
 
@@ -417,7 +448,6 @@ services:
     network_mode: "service:vmsanalyticssingleton"
     depends_on:
       - vmsanalyticssingleton
-      - redis
 
   # video_a analytics worker — stateless RTSP/OpenVINO engine: crops travel in the detection
   # events and are persisted by vmsanalyticssingleton onto the shared data volume. Models are baked into
@@ -433,6 +463,8 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
   analytics-worker-dapr:
     image: "daprio/daprd:latest"
@@ -492,7 +524,6 @@ services:
     network_mode: "service:vms"
     depends_on:
       - vms
-      - redis
 
   web_vms:
     image: treealarm/web_vms:latest
@@ -526,4 +557,3 @@ services:
     network_mode: "service:web_vms"
     depends_on:
       - web_vms
-      - redis

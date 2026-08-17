@@ -3,17 +3,51 @@ kind: Component
 metadata:
   name: orderpubsub
 spec:
-  type: pubsub.redis
+  # RabbitMQ, not the Redis this used to be. Once the state store moved to PostgreSQL, Redis was
+  # left carrying only this bus — and it is the one broker with no native Windows build, which
+  # blocks the Docker-free installer planned after Kubernetes. RabbitMQ covers all three targets.
+  #
+  # Behaviour is unchanged: consumerID defaults to the app id and works exactly like the Redis
+  # Streams consumer group it replaces. Dapr creates one fanout exchange per topic and one durable
+  # queue per (app id, topic) on first subscribe — verified, and it is why the limits below are
+  # safe: a noisy topic can only fill its own queue, never another topic's backlog.
+  type: pubsub.rabbitmq
   version: v1
   metadata:
-  - name: redisHost
-    value: redis:6379
-  - name: redisPassword
-    value: ""
-  # Headroom over the default 10-connection redis client pool. Pool exhaustion ("redis:
-  # connection pool timeout" spiraling in a sidecar) was observed live when an app resubscribed
-  # its streaming subscriptions in a loop, stacking consumers — the real fix is subscribe-once
-  # on the app side (see VmsOnvif.CameraConfigSubscriber), this just keeps normal multi-topic
-  # load far from the limit.
-  - name: poolSize
-    value: "64"
+  # Literal, because Dapr does not expand environment variables in component metadata. User and
+  # password must match RABBITMQ_DEFAULT_USER/RABBITMQ_DEFAULT_PASS in .env — db-init compares
+  # them and stops the stack if they drift. "guest" cannot be used at all: RabbitMQ accepts that
+  # account only from localhost, so every sidecar in a container would be rejected.
+  - name: connectionString
+    value: "amqp://vms:vms@rabbitmq:5672/"
+  # Both of these are NOT the component's defaults, and both are required to keep the behaviour the
+  # Redis Streams consumer group used to give. Out of the box Dapr declares the queue with
+  # durable=false and deletedWhenUnused=true, so it disappears the moment the subscriber
+  # disconnects — verified: stop a subscriber, publish, start it again, and the events are gone.
+  # Every consumer here is a service that gets restarted, and the events missed during a restart
+  # are exactly the ones that must not be missed: a camera reconfigured while a node was down
+  # would leave that node's cache stale until something else happened to invalidate it.
+  # durable=true additionally keeps the queue across a broker restart.
+  #
+  # Changing either of these on a broker that has already run is not free: they are declaration
+  # arguments of both the queue *and* the topic exchange, and RabbitMQ refuses to redeclare an
+  # existing object with different ones ("PRECONDITION_FAILED - inequivalent arg 'auto_delete'").
+  # Dapr then retries that subscription forever and the service silently receives nothing. Delete
+  # the old exchange once (management API: DELETE /api/exchanges/%2F/<topic>) and restart the
+  # subscriber; an exchange holds no messages, so nothing is lost.
+  - name: durable
+    value: "true"
+  - name: deletedWhenUnused
+    value: "false"
+  # The other half of that pair: a queue that outlives its subscriber must not grow without bound —
+  # a service switched off for a week would otherwise come back to a week of stale signals, with
+  # the disk paying for it meanwhile. Safe to cap: every payload here is a notification, and
+  # subscribers re-fetch the real state from VmsCfg.
+  - name: maxLen
+    value: "10000"
+  - name: ttlInSeconds
+    value: "3600"
+  # No connection-pool knob, unlike the Redis component this replaces — but the problem it worked
+  # around is still real: an app that resubscribes its streaming subscriptions in a loop stacks
+  # consumers, which on RabbitMQ shows up as a growing channel count. The fix is subscribe-once on
+  # the app side, see VmsOnvif.CameraConfigSubscriber in the ta_vms sources.

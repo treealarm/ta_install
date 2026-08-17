@@ -1,8 +1,9 @@
 # ta_install
 
 Standalone product deployment for the TreeAlarm VMS: the `ta_vms` services plus the `video_a`
-analytics worker, packaged as one docker-compose stack. Self-contained — its own Redis, its own
-(isolated, default) docker network, no dependency on the `Square`/`multitenant_admin` stack.
+analytics worker, packaged as one docker-compose stack. Self-contained — its own database, its own
+broker, its own (isolated, default) docker network, no dependency on the `Square`/`multitenant_admin`
+stack.
 
 It pulls prebuilt images (`treealarm/...:latest`) from Docker Hub, so it reflects whatever was
 last published with `scripts/push-images.sh` — no source checkouts are needed to *run* it.
@@ -13,7 +14,7 @@ last published with `scripts/push-images.sh` — no source checkouts are needed 
 docker compose --env-file .env up -d
 ```
 
-Postgres, Redis, MediaMTX, Dapr sidecars, all `vms*`/`web_vms` services and the analytics worker
+Postgres, RabbitMQ, MediaMTX, Dapr sidecars, all `vms*`/`web_vms` services and the analytics worker
 come up together. The first start takes longer while images are pulled.
 
 ## What you get
@@ -39,6 +40,10 @@ Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars 
   `init_files/dapr_components/statestore.yaml`, which backs the Dapr state store. Dapr cannot read
   environment variables in component metadata, so the component carries its own copy. Change one
   and not the other and `db-init` stops the stack on the next start, naming the file.
+- `RABBITMQ_DEFAULT_PASS` — same story, in `.env` and in
+  `init_files/dapr_components/orderpubsub.yaml`, which is the message bus. `db-init` checks this
+  pair too. The broker itself is not published on the network; only its management UI is, and only
+  on `127.0.0.1:15672`.
 
 ## Databases
 

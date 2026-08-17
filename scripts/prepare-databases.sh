@@ -121,13 +121,15 @@ fi
 # ---------------------------------------------------------------------------------------------
 # Cross-check the Dapr components against the environment.
 #
-# Dapr does not expand environment variables in component metadata, so a component that talks to
-# PostgreSQL carries a literal connection string — the only place in the deployment where the
-# database name and the credentials are written down twice. Changing POSTGRES_PASSWORD in .env
+# Dapr does not expand environment variables in component metadata, so a component carries its
+# connection string as a literal — the only place in the deployment where a database name or a
+# credential is written down twice. Changing POSTGRES_PASSWORD or RABBITMQ_DEFAULT_PASS in .env
 # and forgetting the component does not fail loudly: daprd logs one component error at startup
-# and carries on with a state store that never works, which then looks like "actors are broken"
-# or "permissions are cached forever". Comparing the two copies here costs nothing.
+# and carries on with a store or a bus that never works, which then looks like "actors are
+# broken", "permissions are cached forever" or "nobody reacts to config changes". Comparing the
+# two copies here costs nothing.
 #
+# Two kinds of component are recognised: PostgreSQL (host=...) and RabbitMQ (amqp://...).
 # Components pointing at some other server are none of our business and are skipped: only the
 # ones whose host is this very server are compared.
 component_dirs=()
@@ -157,6 +159,42 @@ for dir in "${component_dirs[@]}"; do
   seen_dirs="$seen_dirs:$canonical"
   while IFS= read -r -d '' file; do
     file_problems=0
+
+    # RabbitMQ: amqp://user:password@host:port/. Only the credentials are compared — a wrong host
+    # or port fails immediately and visibly ("connection refused"), while a wrong password is the
+    # silent one, and the in-network and host-side twins legitimately differ in both.
+    amqp="$(grep -oE 'amqp://[^"[:space:]]+' "$file" | head -n1)" || true
+    if [ -n "$amqp" ]; then
+      if [ -z "${RABBITMQ_DEFAULT_USER:-}" ] && [ -z "${RABBITMQ_DEFAULT_PASS:-}" ]; then
+        echo "   [skip] $(basename "$file"): RABBITMQ_DEFAULT_USER/PASS not in the environment"
+        continue
+      fi
+      component_checked=$(( component_checked + 1 ))
+      credentials="${amqp#amqp://}"
+      credentials="${credentials%%@*}"
+      a_user="${credentials%%:*}"
+      a_pass="${credentials#*:}"
+      if [ "$a_user" != "${RABBITMQ_DEFAULT_USER:-}" ]; then
+        echo "   [FAIL] $file: user '$a_user' != RABBITMQ_DEFAULT_USER '${RABBITMQ_DEFAULT_USER:-}'" >&2
+        file_problems=$(( file_problems + 1 ))
+      fi
+      if [ "$a_pass" != "${RABBITMQ_DEFAULT_PASS:-}" ]; then
+        echo "   [FAIL] $file: password does not match RABBITMQ_DEFAULT_PASS" >&2
+        echo "          Dapr cannot read it from the environment — change it in both places." >&2
+        file_problems=$(( file_problems + 1 ))
+      fi
+      if [ "$a_user" = "guest" ]; then
+        echo "   [FAIL] $file: 'guest' cannot be used — RabbitMQ accepts it only from localhost," >&2
+        echo "          so every sidecar in a container is rejected." >&2
+        file_problems=$(( file_problems + 1 ))
+      fi
+      if [ "$file_problems" -eq 0 ]; then
+        echo "   [ ok ] $(basename "$file") -> amqp as '$a_user', matches the environment"
+      fi
+      component_problems=$(( component_problems + file_problems ))
+      continue
+    fi
+
     # A password with a space in it would not survive this split — but it would not survive the
     # unquoted connection string in the component either, so it is the same constraint.
     conn="$(grep -oE '"[^"]*host=[^"]*"' "$file" | head -n1 | tr -d '"')" || true

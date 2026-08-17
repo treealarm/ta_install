@@ -3,11 +3,12 @@ kind: Component
 metadata:
   name: statestore
 spec:
-  # PostgreSQL, not the redis next door. State here outlives a restart — ONVIF observed topics,
-  # the media server heartbeat, the camera-permission version — while the redis service in this
-  # compose file has no volume at all, so anything left in it disappears with the container. The
-  # same postgres that already holds the archive metadata costs nothing extra and is backed up
-  # together with the rest of ./data.
+  # PostgreSQL, not the redis this used to be — the first of the two components to leave it, the
+  # bus followed later (see orderpubsub.yaml, and there is no redis service here any more). State
+  # here outlives a restart — ONVIF observed topics, the media server heartbeat, the
+  # camera-permission version — while that redis was declared with no volume at all, so anything
+  # left in it disappeared with the container. The same postgres that already holds the archive
+  # metadata costs nothing extra and is backed up together with the rest of ./data.
   #
   # v1, not v2: v1 stores the value in a JSONB column. media_server writes its heartbeat as the
   # quoted string "online" straight from C++ (not through a Dapr SDK), which is valid JSON and so
