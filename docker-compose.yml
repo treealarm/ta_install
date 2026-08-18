@@ -503,6 +503,46 @@ services:
       - vmsfs
       - mediamtx
 
+  roitrc:
+    image: treealarm/roitrc:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: roitrc
+    # The only service that touches the GPU. Without the device it still runs --
+    # the encoder falls back to libx264 -- just far slower. `render` owns
+    # /dev/dri/renderD128 on the host; drop both keys on a host without an
+    # Intel GPU.
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - "render"
+    volumes: *data-volume
+    depends_on:
+      - vmscfg
+
+  roitrc-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "roitrc"
+      - "-app-port"
+      - "${GRPC_ROI_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:roitrc"
+    depends_on:
+      - roitrc
+
   vms-dapr:
     image: "daprio/daprd:latest"
     command:

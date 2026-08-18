@@ -25,6 +25,7 @@ declare -a PAIRS=(
     "ta_vms-vmsfs:latest           $NAMESPACE/vmsfs:latest"
     "ta_vms-vmsanalyticssingleton:latest    $NAMESPACE/vmsanalyticssingleton:latest"
     "ta_vms-vms:latest             $NAMESPACE/vms:latest"
+    "ta_vms-roitrc:latest          $NAMESPACE/roitrc:latest"
     "ta_vms-web_vms:latest         $NAMESPACE/web_vms:latest"
     "analytics-worker:latest      $NAMESPACE/analytics-worker:latest"
 )
