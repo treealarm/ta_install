@@ -110,7 +110,7 @@ Requires sibling source checkouts (`../ta_vms`, `../video_a`; override with
 `TA_VMS_DIR`/`VIDEO_A_DIR`):
 
 ```sh
-scripts/build-images.sh         # vms-deps (once) + all ta_vms services + analytics-worker
+scripts/build-images.sh         # ta-deps (once) + all ta_vms services + analytics-worker
 docker login                    # or export DOCKER_USER + DOCKER_TOKEN
 scripts/push-images.sh          # tag treealarm/* and push
 ```

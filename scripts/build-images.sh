@@ -15,12 +15,12 @@ for dir in "$TA_VMS_DIR" "$VIDEO_A_DIR"; do
 done
 
 # 1. Base image with prebuilt C++ deps for media_server — only when missing (it's huge and
-#    changes rarely; `docker rmi vms-deps` to force a rebuild).
-if ! docker image inspect vms-deps &>/dev/null; then
-    echo "=== Building vms-deps ==="
-    docker build -t vms-deps "$TA_VMS_DIR/vms-deps"
+#    changes rarely; `docker rmi ta-deps` to force a rebuild).
+if ! docker image inspect ta-deps &>/dev/null; then
+    echo "=== Building ta-deps ==="
+    docker build -t ta-deps "$TA_VMS_DIR/ta-deps"
 else
-    echo "=== vms-deps already exists, skipping ==="
+    echo "=== ta-deps already exists, skipping ==="
 fi
 
 # 2. All ta_vms services (produces ta_vms-* images via the dev compose build definitions).
@@ -40,7 +40,7 @@ for svc in $BUILDABLE_SERVICES; do
     docker compose -f "$TA_VMS_DIR/docker-compose.yml" --profile app build "$svc"
 done
 
-# 3. video_a analytics worker — its Dockerfile builds FROM vms-deps (step 1), so this only
+# 3. video_a analytics worker — its Dockerfile builds FROM ta-deps (step 1), so this only
 #    compiles video_a's own small source tree, not protobuf/grpc/spdlog/ffmpeg/openvino again.
 echo "=== Building analytics-worker ==="
 docker build -t analytics-worker "$VIDEO_A_DIR"
