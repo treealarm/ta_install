@@ -23,6 +23,15 @@ else
     echo "=== ta-deps already exists, skipping ==="
 fi
 
+# 1b. Same again for roi_transcode, which has its own base: it is the only consumer that needs
+#     qsv/vaapi, and it does not link openvino, which is most of what ta-deps spends its time on.
+if ! docker image inspect roi-deps &>/dev/null; then
+    echo "=== Building roi-deps ==="
+    docker build -t roi-deps "$TA_VMS_DIR/roi-deps"
+else
+    echo "=== roi-deps already exists, skipping ==="
+fi
+
 # 2. All ta_vms services (produces ta_vms-* images via the dev compose build definitions).
 #    Built one at a time, not `compose build`'s default parallel mode: a parallel build peaks
 #    higher on memory (e.g. linking the C++ `vms` target alongside a `web_vms` dotnet build can
