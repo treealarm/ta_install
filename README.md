@@ -45,6 +45,27 @@ Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars 
   pair too. The broker itself is not published on the network; only its management UI is, and only
   on `127.0.0.1:15672`.
 
+### Hardware encoding on a host with an Intel iGPU
+
+`roitrc` re-encodes finished archive clips, keeping the regions analytics found sharp. It runs on
+the CPU by default, which works everywhere and is several times slower — that only affects how
+quickly the backlog of clips drains, never whether it drains.
+
+To give it the iGPU:
+
+```bash
+cp docker-compose.gpu.yml.example docker-compose.override.yml
+```
+
+Compose merges `docker-compose.override.yml` automatically, so the `up` command above does not
+change. The device is not in `docker-compose.yml` on purpose: `devices:` is resolved when the
+container is created, so naming `/dev/dri` on a host that has none fails the create outright rather
+than falling back — and the fallback lives inside the process, which never starts.
+
+Check the group while you are there: the example uses `render`, which owns `/dev/dri/renderD128` on
+Debian and Ubuntu. Where it is `video` instead, the device is present but cannot be opened, and the
+encoder quietly uses the CPU anyway.
+
 ## Databases
 
 The `db-init` service creates them. It runs on every `docker compose up`, creates each database

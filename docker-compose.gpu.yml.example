@@ -1,0 +1,20 @@
+# Hardware encoding for roi-transcode-svc on a host with an Intel iGPU.
+#
+# Copy to docker-compose.override.yml (which is untracked): compose merges that
+# file automatically, so `docker compose --env-file .env up -d` stays exactly as
+# documented, and this file is never edited in place -- an update cannot conflict
+# with a local choice.
+#
+# Without it roitrc still works, encoding on the CPU with libx264. That is
+# several times slower, which matters only for how fast the backlog of clips
+# drains.
+#
+# `render` is the group that owns /dev/dri/renderD128 on Debian and Ubuntu. On a
+# host where it is `video` instead, change it here -- getting it wrong leaves the
+# device present but unopenable, and the encoder falls back silently.
+services:
+  roitrc:
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - "render"

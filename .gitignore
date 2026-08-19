@@ -3,3 +3,6 @@
 
 # Per-installation overrides
 .env.local
+
+# Per-installation compose overrides (see docker-compose.gpu.yml.example)
+docker-compose.override.yml

@@ -509,14 +509,15 @@ services:
       - .env
     environment:
       APP_ID: roitrc
-    # The only service that touches the GPU. Without the device it still runs --
-    # the encoder falls back to libx264 -- just far slower. `render` owns
-    # /dev/dri/renderD128 on the host; drop both keys on a host without an
-    # Intel GPU.
-    devices:
-      - "/dev/dri:/dev/dri"
-    group_add:
-      - "render"
+    # The only service that touches the GPU, and the device is deliberately not
+    # named here. `devices:` is resolved when the container is created, so a host
+    # without /dev/dri fails the create instead of falling back to libx264 --
+    # the fallback lives inside the process, which never starts. Compose has no
+    # optional device, so the default has to be the one that works everywhere.
+    #
+    # On a host with an Intel iGPU: cp docker-compose.gpu.yml.example
+    # docker-compose.override.yml -- compose merges it automatically, so the
+    # documented `up` command stays the same and no tracked file is edited.
     volumes: *data-volume
     depends_on:
       - vmscfg
