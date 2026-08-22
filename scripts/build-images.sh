@@ -27,7 +27,7 @@ fi
 #     qsv/vaapi, and it does not link openvino, which is most of what ta-deps spends its time on.
 if ! docker image inspect roi-deps &>/dev/null; then
     echo "=== Building roi-deps ==="
-    docker build -t roi-deps "$TA_VMS_DIR/roi-deps"
+    docker build -t roi-deps -f "$TA_VMS_DIR/roi_transcode/docker/intel/Dockerfile.deps" "$TA_VMS_DIR/roi_transcode/docker/intel"
 else
     echo "=== roi-deps already exists, skipping ==="
 fi
