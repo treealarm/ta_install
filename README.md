@@ -62,9 +62,24 @@ change. The device is not in `docker-compose.yml` on purpose: `devices:` is reso
 container is created, so naming `/dev/dri` on a host that has none fails the create outright rather
 than falling back — and the fallback lives inside the process, which never starts.
 
-Check the group while you are there: the example uses `render`, which owns `/dev/dri/renderD128` on
-Debian and Ubuntu. Where it is `video` instead, the device is present but cannot be opened, and the
-encoder quietly uses the CPU anyway.
+Set the group id in the copy before starting:
+
+```bash
+stat -c '%g' /dev/dri/renderD128
+```
+
+It has to be the number. `group_add: "render"` resolves the name inside the container, and the
+roitrc image is a bare `ubuntu:24.04` with no `render` group at all. Get it wrong and the device is
+there but cannot be opened, so the encoder falls back to the CPU and the passthrough looks like it
+did nothing.
+
+Check it worked — each command answers a different failure:
+
+```bash
+docker compose exec roitrc ls -l /dev/dri   # passed through at all?
+docker compose exec roitrc vainfo           # driver loaded, encode profiles?
+docker compose exec roitrc vpl-inspect      # a hardware oneVPL implementation?
+```
 
 ## Databases
 

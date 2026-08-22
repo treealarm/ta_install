@@ -1,20 +1,41 @@
 # Hardware encoding for roi-transcode-svc on a host with an Intel iGPU.
 #
-# Copy to docker-compose.override.yml (which is untracked): compose merges that
-# file automatically, so `docker compose --env-file .env up -d` stays exactly as
-# documented, and this file is never edited in place -- an update cannot conflict
-# with a local choice.
+# Copy to docker-compose.override.yml (untracked), set the GID below, and leave
+# the rest alone: compose merges that file automatically, so
+# `docker compose --env-file .env up -d` stays exactly as documented and no
+# tracked file is edited -- an update cannot conflict with a local choice.
 #
 # Without it roitrc still works, encoding on the CPU with libx264. That is
-# several times slower, which matters only for how fast the backlog of clips
-# drains.
+# several times slower, which only affects how fast the backlog of clips drains.
 #
-# `render` is the group that owns /dev/dri/renderD128 on Debian and Ubuntu. On a
-# host where it is `video` instead, change it here -- getting it wrong leaves the
-# device present but unopenable, and the encoder falls back silently.
+# ---------------------------------------------------------------------------
+# The GID is not optional and cannot be a name.
+#
+#     stat -c '%g' /dev/dri/renderD128
+#
+# `group_add: "render"` resolves the name inside the *container*, and the runtime
+# image is a bare ubuntu:24.04 that has no `render` group at all -- while on the
+# host it is usually 110 or 109, and differs between distributions. Get this
+# wrong and the device is present but cannot be opened, so the encoder falls back
+# to the CPU and the passthrough looks like it did nothing.
+#
+# The render node is the only device needed: the VA-API path opens
+# /dev/dri/renderD128 by name and the QSV path finds it through the oneVPL
+# dispatcher. cardN is for display, and passing the whole /dev/dri hands the
+# container every GPU on the box.
+#
+# Verify inside the container, in this order -- each answers a different failure:
+#
+#     docker compose exec roitrc ls -l /dev/dri     # passed through at all?
+#     docker compose exec roitrc vainfo             # driver loaded, encode profiles?
+#     docker compose exec roitrc vpl-inspect        # a hardware oneVPL implementation?
+#
+# vainfo should name the Intel iHD driver and list VAProfileH264Main/High with
+# VAEntrypointEncSliceLP; vpl-inspect should report MFX_IMPL_TYPE_HARDWARE.
+# ---------------------------------------------------------------------------
 services:
   roitrc:
     devices:
-      - "/dev/dri:/dev/dri"
+      - "/dev/dri/renderD128:/dev/dri/renderD128"
     group_add:
-      - "render"
+      - "110"
