@@ -125,9 +125,17 @@ Requires sibling source checkouts (`../ta_vms`, `../video_a`; override with
 `TA_VMS_DIR`/`VIDEO_A_DIR`):
 
 ```sh
-scripts/build-images.sh         # ta-deps (once) + all ta_vms services + analytics-worker
+scripts/build-images.sh         # C++ bases (reused/pulled by content tag) + all ta_vms services + analytics-worker
 docker login                    # or export DOCKER_USER + DOCKER_TOKEN
 scripts/push-images.sh          # tag treealarm/* and push
+```
+
+The ta_vms service images are also built by CI (`ta_vms/.github/workflows/images.yml`) and pushed
+on every merge to master. CI cannot build the C++ base images itself, so after a change to
+`ta_vms/ta-deps/` or to the encoder's `docker/intel/` publish them first:
+
+```sh
+scripts/push-deps-images.sh     # build or pull treealarm/ta-deps and roi-deps, push under their content tags
 ```
 
 The first `analytics-worker` build is long (vcpkg + OpenVINO from source); later builds reuse
