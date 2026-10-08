@@ -16,8 +16,8 @@ done
 
 # The encoder is a submodule of ta_vms, not a directory in it: an unpopulated checkout
 # fails here with a fix rather than deep inside cmake with a missing header.
-[ -f "$TA_VMS_DIR/roitrc/sve/CMakeLists.txt" ] || {
-    echo "roitrc/sve is empty -- run: git -C $TA_VMS_DIR submodule update --init --recursive"
+[ -f "$TA_VMS_DIR/roitrc/ta_roienc/CMakeLists.txt" ] || {
+    echo "roitrc/ta_roienc is empty -- run: git -C $TA_VMS_DIR submodule update --init --recursive"
     exit 1
 }
 
@@ -36,8 +36,8 @@ fi
 #     image itself is built below with the rest of ta_vms.
 if ! docker image inspect roi-deps &>/dev/null; then
     echo "=== Building roi-deps ==="
-    docker build -t roi-deps -f "$TA_VMS_DIR/roitrc/sve/docker/intel/Dockerfile.deps" \
-        "$TA_VMS_DIR/roitrc/sve/docker/intel"
+    docker build -t roi-deps -f "$TA_VMS_DIR/roitrc/ta_roienc/docker/intel/Dockerfile.deps" \
+        "$TA_VMS_DIR/roitrc/ta_roienc/docker/intel"
 else
     echo "=== roi-deps already exists, skipping ==="
 fi
