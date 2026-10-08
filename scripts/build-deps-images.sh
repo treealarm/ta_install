@@ -49,4 +49,4 @@ ensure_image ta-deps "$TA_DEPS_TAG" "$TA_VMS_DIR/ta-deps/Dockerfile" "$TA_VMS_DI
 # openvino, which is most of what ta-deps spends its time on. The Dockerfile belongs to the
 # encoder and arrives with the submodule.
 ensure_image roi-deps "$ROI_DEPS_TAG" \
-    "$TA_VMS_DIR/roitrc/sve/docker/intel/Dockerfile.deps" "$TA_VMS_DIR/roitrc/sve/docker/intel"
+    "$TA_VMS_DIR/roitrc/ta_roienc/docker/intel/Dockerfile.deps" "$TA_VMS_DIR/roitrc/ta_roienc/docker/intel"
