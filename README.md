@@ -100,6 +100,9 @@ Baked into the `analytics-worker` image at build time (see `video_a/Dockerfile` 
 `video_a/models/`) — nothing to fetch or mount, works out of the box:
 
 - `face_detector.xml/.bin` — OMZ face-detection-0205, Apache-2.0.
+- `plate_detector.xml/.bin` — OMZ vehicle-license-plate-detection-barrier-0106, Apache-2.0. Locates
+  the plate rectangle; reading the characters off it needs `plate_ocr.xml/.bin`, which is not
+  wired up yet, so a plate detection carries no text.
 - `primary_detector.xml/.bin` (person/vehicle) — a YOLO11n OpenVINO export. **Licensing note:**
   Ultralytics YOLO11 is AGPL-3.0. Baking its weights into an image that gets deployed to
   customers over a network is a conscious, deliberate call made for now to get a working turnkey
