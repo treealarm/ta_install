@@ -96,25 +96,30 @@ docker compose run --rm db-init --check
 
 ## Analytics models
 
-Baked into the `analytics-worker` image at build time (see `video_a/Dockerfile` and
-`video_a/models/`) — nothing to fetch or mount, works out of the box:
+Baked into the `analytics-worker` image at build time (see `video_a/Dockerfile`'s `models` stage
+and `video_a/models/`) — nothing to fetch or mount, works out of the box. A local build takes them
+from `video_a/models/`; video_a's CI takes the published `treealarm/analytics-models:<tag>` named in
+`video_a/models.tag` (published by `video_a/scripts/push-models-image.sh`).
 
 - `face_detector.xml/.bin` — OMZ face-detection-0205, Apache-2.0.
-- `plate_detector.xml/.bin` — OMZ vehicle-license-plate-detection-barrier-0106, Apache-2.0. Locates
-  the plate rectangle; reading the characters off it needs `plate_ocr.xml/.bin`, which is not
-  wired up yet, so a plate detection carries no text.
-- `primary_detector.xml/.bin` (person/vehicle) — a YOLO11n OpenVINO export. **Licensing note:**
-  Ultralytics YOLO11 is AGPL-3.0. Baking its weights into an image that gets deployed to
-  customers over a network is a conscious, deliberate call made for now to get a working turnkey
-  deploy — it has not been reconciled with AGPL's network-use clause (which can require
-  open-sourcing the whole product, or an Ultralytics Enterprise license for closed distribution).
-  Revisit before any real customer rollout: either clear the licensing properly or swap in a
-  permissively-licensed detector.
-- `person_embedder.onnx/.xml` (OPTIONAL) — an OSNet body ReID model (256×128 input, 512-d output),
-  used for cross-camera / cross-gap object re-identification that drives event grouping. **Not
-  bundled** — drop it into `video_a/models/` to enable body re-id. When absent, the worker logs
-  "body re-id disabled" and simply emits no embedding; analytics still works, but each detection
-  gets its own (per-track) object id and events group only within a single track.
+- `plate_detector.xml/.bin` — a YOLOv8n single-class licence-plate detector (an Ultralytics
+  fine-tune, AGPL-3.0, see the licensing note below). Locates the plate rectangle; reading the
+  characters off it needs `plate_ocr.xml/.bin`, which is not wired up yet, so a plate detection
+  carries no text.
+- `primary_detector.xml/.bin` (person/vehicle) — a YOLO11n OpenVINO export.
+- `person_embedder.onnx` (+ `.onnx.data`) — an OSNet body ReID model (256×128 input, 512-d output),
+  used for cross-camera / cross-gap object re-identification that drives event grouping. Without
+  it the worker logs "embedding disabled" and simply emits no embedding; analytics still works,
+  but each detection gets its own (per-track) object id and events group only within a single
+  track.
+- `face_embedder` — **not bundled**: face re-identification is disabled in the image.
+
+**Licensing note:** both YOLO detectors are Ultralytics models, and Ultralytics YOLO is AGPL-3.0.
+Baking their weights into an image that gets deployed to customers over a network is a conscious,
+deliberate call made for now to get a working turnkey deploy — it has not been reconciled with
+AGPL's network-use clause (which can require open-sourcing the whole product, or an Ultralytics
+Enterprise license for closed distribution). Revisit before any real customer rollout: either clear
+the licensing properly or swap in permissively-licensed detectors.
 
 ## Adding a camera
 
