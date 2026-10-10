@@ -179,6 +179,42 @@ services:
     depends_on:
       - vmssquaresingleton
 
+  vmsptztrackingsingleton:
+    image: treealarm/vmsptztrackingsingleton:latest
+    env_file:
+      - .env
+    environment:
+      APP_ID: vmsptztrackingsingleton
+    # Exactly one instance: a camera must have exactly one control loop, or two of them send the
+    # motor opposing commands. See CLAUDE.md.
+    volumes: *data-volume
+    depends_on:
+      - vmscfg
+
+  vmsptztrackingsingleton-dapr:
+    image: "daprio/daprd:latest"
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsptztrackingsingleton"
+      - "-app-port"
+      - "${PTZ_TRACKING_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-placement-host-address"
+      - "dapr-placement:50005"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsptztrackingsingleton"
+    depends_on:
+      - vmsptztrackingsingleton
+
   vmsutils:
     image: treealarm/vmsutils:latest
     env_file:
@@ -457,8 +493,13 @@ services:
     environment:
       ANALYTICS_GRPC_PORT: "50060"
       ANALYTICS_DEVICE: CPU
+      ANALYTICS_VIDEO_DECODER: "${ANALYTICS_VIDEO_DECODER}"
       ANALYTICS_REID_EMBED_INTERVAL_SEC: "${ANALYTICS_REID_EMBED_INTERVAL_SEC}"
       ANALYTICS_STUB_SYNTHETIC_DETECTIONS: "false"
+      # The address the worker hands back when media_server asks to publish to it. Only the
+      # worker knows where it is reachable, and its own hostname is a container id nothing else
+      # can resolve -- so the compose service name is named here explicitly.
+      ANALYTICS_ADVERTISE_HOST: analytics-worker
     # For its sidecar's state store component, not for itself — see vmssingleton above.
     depends_on:
       db-init:
