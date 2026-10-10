@@ -1,4 +1,4 @@
-# Hardware encoding for roi-transcode-svc on a host with an Intel iGPU.
+# Hardware encoding for roitrc on a host with an Intel iGPU.
 #
 # Copy to docker-compose.override.yml (untracked), set the GID below, and leave
 # the rest alone: compose merges that file automatically, so
