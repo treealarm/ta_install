@@ -1,5 +1,7 @@
 # ta_install
 
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/treealarm)
+
 Standalone product deployment for the TreeAlarm VMS: the `ta_vms` services plus the `video_a`
 analytics worker, packaged as one docker-compose stack. Self-contained — its own database, its own
 broker, its own (isolated, default) docker network, no dependency on the `Square`/`multitenant_admin`
