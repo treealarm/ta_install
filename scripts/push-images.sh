@@ -3,14 +3,14 @@ set -euo pipefail
 
 # Tags the locally built images (see build-images.sh) as treealarm/* and pushes them.
 #
-# Authentication: run `docker login` beforehand, or export DOCKER_USER + DOCKER_TOKEN in the
-# environment — credentials are never stored in this repository.
+# Authentication: run `docker login` beforehand, or export DOCKERHUB_USERNAME + DOCKERHUB_TOKEN
+# in the environment — credentials are never stored in this repository.
 
 NAMESPACE="treealarm"
 REGISTRY="docker.io"
 
-if [ -n "${DOCKER_TOKEN:-}" ]; then
-    echo "${DOCKER_TOKEN}" | docker login "$REGISTRY" -u "${DOCKER_USER:?DOCKER_USER must be set when DOCKER_TOKEN is used}" --password-stdin
+if [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+    echo "${DOCKERHUB_TOKEN}" | docker login "$REGISTRY" -u "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME must be set when DOCKERHUB_TOKEN is used}" --password-stdin
 fi
 
 # local image -> remote image

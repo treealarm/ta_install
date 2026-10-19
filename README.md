@@ -136,7 +136,7 @@ Requires sibling source checkouts (`../ta_vms`, `../video_a`; override with
 
 ```sh
 scripts/build-images.sh         # C++ bases (reused/pulled by content tag) + all ta_vms services + analytics-worker
-docker login                    # or export DOCKER_USER + DOCKER_TOKEN
+docker login                    # or export DOCKERHUB_USERNAME + DOCKERHUB_TOKEN
 scripts/push-images.sh          # tag treealarm/* and push
 ```
 

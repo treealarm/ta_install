@@ -6,8 +6,8 @@ set -euo pipefail
 # them itself -- ta-deps takes ~4 hours, which a hosted runner's 6-hour job limit and ~14 GB of
 # disk do not reliably fit -- and fails with a pointer here when the tag it needs is missing.
 #
-# Authentication: run `docker login` beforehand, or export DOCKER_USER + DOCKER_TOKEN in the
-# environment — credentials are never stored in this repository.
+# Authentication: run `docker login` beforehand, or export DOCKERHUB_USERNAME + DOCKERHUB_TOKEN
+# in the environment — credentials are never stored in this repository.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TA_VMS_DIR="${TA_VMS_DIR:-$SCRIPT_DIR/../../ta_vms}"
@@ -15,8 +15,8 @@ export TA_VMS_DIR
 NAMESPACE="treealarm"
 REGISTRY="docker.io"
 
-if [ -n "${DOCKER_TOKEN:-}" ]; then
-    echo "${DOCKER_TOKEN}" | docker login "$REGISTRY" -u "${DOCKER_USER:?DOCKER_USER must be set when DOCKER_TOKEN is used}" --password-stdin
+if [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+    echo "${DOCKERHUB_TOKEN}" | docker login "$REGISTRY" -u "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME must be set when DOCKERHUB_TOKEN is used}" --password-stdin
 fi
 
 "$SCRIPT_DIR/build-deps-images.sh"
