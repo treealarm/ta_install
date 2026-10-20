@@ -15,6 +15,10 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
+$logDir = Join-Path $DataDir 'install-logs'
+New-Item -ItemType Directory -Force $logDir | Out-Null
+Start-Transcript -Path (Join-Path $logDir ('uninstall-{0:yyyyMMdd-HHmmss}.log' -f (Get-Date))) | Out-Null
+
 & (Join-Path $PSScriptRoot 'Stop-TaVms.ps1') -InstallDir $InstallDir
 
 if (Get-Service 'TaVmsHost' -ErrorAction SilentlyContinue) {
@@ -22,10 +26,10 @@ if (Get-Service 'TaVmsHost' -ErrorAction SilentlyContinue) {
 }
 
 if (Get-Service 'TaVms.RabbitMQ' -ErrorAction SilentlyContinue) {
-  $env:ERLANG_HOME = Join-Path $InstallDir 'erlang'
-  $env:RABBITMQ_BASE = Join-Path $DataDir 'rabbitmq'
-  $env:RABBITMQ_SERVICENAME = 'TaVms.RabbitMQ'
-  & (Join-Path $InstallDir 'rabbitmq\sbin\rabbitmq-service.bat') remove
+  # erlsrv itself rather than rabbitmq-service.bat, which first runs erl and so starts a fresh
+  # epmd.exe -- one that would then hold files in the directory about to be deleted.
+  $erlsrv = Get-ChildItem (Join-Path $InstallDir 'erlang') -Filter erlsrv.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($erlsrv) { & $erlsrv.FullName remove TaVms.RabbitMQ }
   if (Get-Service 'TaVms.RabbitMQ' -ErrorAction SilentlyContinue) { sc.exe delete TaVms.RabbitMQ | Out-Null }
 }
 
@@ -36,5 +40,10 @@ if (Get-Service 'TaVms.Postgres' -ErrorAction SilentlyContinue) {
 
 Get-NetFirewallRule -Group 'TreeAlarm VMS' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 
+# Again, now that the services are gone: whatever removing them started (pg_ctl, erlsrv) must not
+# keep a file of the installation directory open while the uninstaller deletes it.
+& (Join-Path $PSScriptRoot 'Stop-TaVms.ps1') -InstallDir $InstallDir
+
 Write-Host "Services removed. Data kept in $DataDir"
+Stop-Transcript | Out-Null
 exit 0
