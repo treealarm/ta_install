@@ -10,6 +10,8 @@ stack.
 It pulls prebuilt images (`treealarm/...:latest`) from Docker Hub, so it reflects whatever was
 last published with `scripts/push-images.sh` — no source checkouts are needed to *run* it.
 
+There is also a Windows installer without Docker — see [`windows/README.md`](windows/README.md).
+
 ## Run it
 
 ```sh

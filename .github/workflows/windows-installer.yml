@@ -1,0 +1,141 @@
+# Builds the Windows installer (windows/installer/ta_vms.iss) and proves it on a clean runner:
+# a silent install, the stack answering through its sidecars, an uninstall.
+#
+# Its input is the ta_vms Windows build, the asset ta_vms-windows-x64.zip of the windows-build
+# prerelease in treealarm/ta_vms, which every push to ta_vms master replaces -- the way the compose
+# stack here runs whatever Docker Hub's :latest is. A new ta_vms build does not trigger this
+# workflow: run it by hand (Actions page, or `gh workflow run windows-installer.yml`).
+
+name: windows-installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - windows/**
+      - .env
+      - init_files/config/mediamtx.yml
+      - .github/workflows/windows-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TA_VMS_REPO: treealarm/ta_vms
+  TA_VMS_RELEASE: windows-build
+  TA_VMS_ASSET: ta_vms-windows-x64.zip
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test TaVmsHost
+        run: dotnet test windows/TaVmsHost.Tests -c Release --nologo
+
+      - name: Download the ta_vms build
+        run: |
+          gh release download $env:TA_VMS_RELEASE --repo $env:TA_VMS_REPO --pattern $env:TA_VMS_ASSET --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw "cannot download $env:TA_VMS_ASSET from $env:TA_VMS_REPO" }
+          gh release view $env:TA_VMS_RELEASE --repo $env:TA_VMS_REPO --json body -q .body
+
+      # Third-party downloads are keyed by versions.json: they change only when it does.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/downloads
+          key: windows-deps-${{ hashFiles('windows/versions.json') }}
+
+      - name: Stage
+        run: |
+          .\windows\scripts\Build-Stage.ps1 `
+            -TaVmsZip (Join-Path $env:RUNNER_TEMP $env:TA_VMS_ASSET) `
+            -Stage (Join-Path $env:RUNNER_TEMP 'stage') `
+            -Cache (Join-Path $env:RUNNER_TEMP 'downloads')
+
+      - name: Build setup.exe
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'cannot install Inno Setup' }
+          }
+          & $iscc /Q "/DStageDir=$env:RUNNER_TEMP\stage" "/DAppVersion=0.1.$env:GITHUB_RUN_NUMBER" `
+            "/DOutputDir=$env:RUNNER_TEMP\out" windows\installer\ta_vms.iss
+          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+          Get-Item "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" | Format-List Name, Length
+
+      - name: Install
+        run: |
+          $setup = Start-Process "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup.log"
+          if ($setup.ExitCode -ne 0) { throw "setup exited with $($setup.ExitCode)" }
+          Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ | Format-Table Name, Status, StartType
+
+      # Each of these goes browser -> web_srv -> its sidecar -> another app's sidecar -> the app
+      # (-> PostgreSQL), so a 200 means name resolution, the components and the databases all work.
+      - name: Smoke test
+        run: |
+          $hostExe = 'C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe'
+          $port = & $hostExe env WEB_VMS_PORT
+          $paths = '/', '/api/recording-profiles', '/api/media-mtx/servers', '/api/entitystate'
+          $deadline = (Get-Date).AddMinutes(5)
+          $pending = [Collections.Generic.List[string]]::new([string[]] $paths)
+          while ($pending.Count -gt 0 -and (Get-Date) -lt $deadline) {
+            foreach ($path in @($pending)) {
+              try {
+                $r = Invoke-WebRequest "http://localhost:$port$path" -TimeoutSec 10 -SkipHttpErrorCheck
+                if ($r.StatusCode -eq 200) { "ok   $path"; $pending.Remove($path) | Out-Null }
+              } catch { }
+            }
+            if ($pending.Count -gt 0) { Start-Sleep -Seconds 5 }
+          }
+          & $hostExe status
+          if ($pending.Count -gt 0) { throw "no 200 within 5 minutes from: $($pending -join ', ')" }
+          $restarted = & $hostExe status | Where-Object { $_ -notmatch 'restarts 0' }
+          if ($restarted) { "::warning::restarted while coming up:`n$($restarted -join "`n")" }
+
+      - name: Uninstall
+        run: |
+          $u = Start-Process 'C:\Program Files\TreeAlarm VMS\unins000.exe' -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($u.ExitCode -ne 0) { throw "uninstall exited with $($u.ExitCode)" }
+          $left = Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ -ErrorAction SilentlyContinue
+          if ($left) { throw "services left behind: $($left.Name -join ', ')" }
+          if (-not (Test-Path 'C:\ProgramData\TreeAlarm\VMS\config\site.env')) { throw 'uninstall removed the data directory' }
+
+      - name: Collect logs
+        if: ${{ always() }}
+        run: |
+          $out = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'logs')
+          Copy-Item "$env:RUNNER_TEMP\setup.log" $out -ErrorAction SilentlyContinue
+          foreach ($d in 'install-logs', 'host-logs', 'logs') {
+            $src = "C:\ProgramData\TreeAlarm\VMS\$d"
+            if (Test-Path $src) { Copy-Item $src (Join-Path $out $d) -Recurse }
+          }
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ta_vms-setup-x64
+          path: ${{ runner.temp }}/out/ta_vms-setup-x64.exe
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

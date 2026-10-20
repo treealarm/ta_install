@@ -6,3 +6,7 @@
 
 # Per-installation compose overrides (see docker-compose.gpu.yml.example)
 docker-compose.override.yml
+
+# Windows installer: .NET build output
+windows/**/bin/
+windows/**/obj/
