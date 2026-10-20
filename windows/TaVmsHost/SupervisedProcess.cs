@@ -175,11 +175,9 @@ internal sealed class SupervisedProcess : IAsyncDisposable
     foreach (var (key, value) in _spec.Env) psi.Environment[key] = value;
 
     var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-    process.OutputDataReceived += (_, e) => { if (e.Data is not null) _output.Write(LogEventLevel.Information, "{Line:l}", e.Data); };
-    process.ErrorDataReceived += (_, e) => { if (e.Data is not null) _output.Write(LogEventLevel.Information, "{Line:l}", e.Data); };
     if (!process.Start()) throw new InvalidOperationException($"{Name}: Process.Start returned false");
-    process.BeginOutputReadLine();
-    process.BeginErrorReadLine();
+    PumpLines(process.StandardOutput, "stdout");
+    PumpLines(process.StandardError, "stderr");
 
     lock (_gate)
     {
@@ -188,6 +186,32 @@ internal sealed class SupervisedProcess : IAsyncDisposable
     }
     _output.Write(LogEventLevel.Information, "{Line:l}", $"=== TaVmsHost started {_spec.FileName} (pid {process.Id})");
     _log.LogInformation("{Name} started, pid {Pid}", Name, process.Id);
+  }
+
+  // A thread of its own per stream rather than BeginOutputReadLine. The pipes Process creates on
+  // Windows are synchronous, so a pending read holds a thread-pool thread until data arrives: two
+  // per child, 48 for the whole stack, all parked. Every burst of output then waited for the pool to
+  // grow a thread at a time, and a child whose pipe filled meanwhile stopped dead in its next write
+  // to the console -- for up to 25 s on a 4-core machine, long enough for calls to it to time out.
+  private void PumpLines(StreamReader reader, string stream)
+  {
+    var thread = new Thread(() =>
+    {
+      try
+      {
+        while (reader.ReadLine() is { } line)
+          _output.Write(LogEventLevel.Information, "{Line:l}", line);
+      }
+      catch (IOException)
+      {
+        // The pipe broke with the process; its exit is handled by SuperviseAsync.
+      }
+    })
+    {
+      IsBackground = true,
+      Name = $"{Name} {stream}",
+    };
+    thread.Start();
   }
 
   private async Task StopProcessAsync(TimeSpan timeout)
