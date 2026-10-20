@@ -79,8 +79,12 @@ internal sealed class ControlPipe(Supervisor supervisor, ILogger<ControlPipe> lo
       return 1;
     }
 
-    using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-    writer.WriteLine(command);
+    // The writer is done before the answer is read: disposed after the reader, it would flush into
+    // a pipe the server has already closed.
+    using (var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true))
+    {
+      writer.WriteLine(command);
+    }
     using var reader = new StreamReader(pipe, Encoding.UTF8);
     var answer = reader.ReadToEnd();
     Console.Write(answer);
