@@ -185,7 +185,7 @@ jobs:
       - name: Compose stack
         run: |
           git archive --format=zip --prefix=ta_vms/ -o dist/ta_vms-docker.zip HEAD \
-            README.md .env docker-compose.yml docker-compose.gpu.yml.example init_files scripts/prepare-databases.sh
+            README.md LICENSE .env docker-compose.yml docker-compose.gpu.yml.example init_files scripts/prepare-databases.sh
 
       # A quoted heredoc, so the backticks and backslashes stay as written; envsubst fills in only
       # the variables it is told about.

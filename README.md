@@ -122,12 +122,12 @@ from `video_a/models/`; video_a's CI takes the published `treealarm/analytics-mo
   track.
 - `face_embedder` — **not bundled**: face re-identification is disabled in the image.
 
-**Licensing note:** both YOLO detectors are Ultralytics models, and Ultralytics YOLO is AGPL-3.0.
-Baking their weights into an image that gets deployed to customers over a network is a conscious,
-deliberate call made for now to get a working turnkey deploy — it has not been reconciled with
-AGPL's network-use clause (which can require open-sourcing the whole product, or an Ultralytics
-Enterprise license for closed distribution). Revisit before any real customer rollout: either clear
-the licensing properly or swap in permissively-licensed detectors.
+**Licensing:** both YOLO detectors are Ultralytics models under AGPL-3.0, so `video_a` — the
+worker that loads and runs them — is AGPL-3.0 as well, and its public repository is what satisfies
+AGPL's network clause for anyone using a deployment. The rest of the product, this repository
+included, is MIT. `video_a/MODEL_LICENSES.md` lists every model with its source and licence; the
+image carries it in `/usr/share/doc/analytics-worker`. Swapping in permissively licensed detectors
+remains possible if a closed distribution is ever needed.
 
 ## Adding a camera
 
@@ -165,3 +165,9 @@ docker compose --env-file .env down
 
 Recorded data, detection crops and Postgres state live under `./data` on the host and are **not**
 removed by `down` (add `-v` only to wipe everything).
+
+## License
+
+[MIT](LICENSE). The images and the Windows installer bundle third-party software under its own
+licences: FFmpeg with GPL-licensed encoders, PostgreSQL, RabbitMQ, Erlang/OTP, MediaMTX, Dapr and
+.NET; the analytics worker is AGPL-3.0 (see "Analytics models" above).
