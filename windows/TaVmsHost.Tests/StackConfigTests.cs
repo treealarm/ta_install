@@ -157,6 +157,14 @@ public sealed class StackConfigTests : IDisposable
   }
 
   [Fact]
+  public void Components_get_longer_than_daprs_default_to_connect()
+  {
+    var config = Load();
+    Assert.Contains("\n  initTimeout: 30s\n", DaprComponents.StateStore(config));
+    Assert.Contains("\n  initTimeout: 30s\n", DaprComponents.PubSub(config));
+  }
+
+  [Fact]
   public void Name_resolution_is_validated()
   {
     Assert.Contains("component: \"mdns\"", DaprComponents.Configuration(Load()));

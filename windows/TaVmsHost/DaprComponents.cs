@@ -7,10 +7,15 @@ namespace TaVmsHost;
 // Dapr does not expand environment variables in component metadata — and db-init compares the two
 // copies. Generating them here leaves one copy, so there is nothing to compare.
 //
-// Everything but the connection details matches ta_install/init_files/dapr_components; the reasons
-// for each setting are written down there.
+// Everything but the connection details and initTimeout matches ta_install/init_files/dapr_components;
+// the reasons for each setting are written down there.
 internal static class DaprComponents
 {
+  // Dapr's default is 5s, and a sidecar whose component misses it exits. On a real machine, with
+  // a dozen sidecars connecting to RabbitMQ in turn, the AMQP handshake has taken longer than that;
+  // each such sidecar was then restarted and came up, but only after a round of failures in the log.
+  private const string InitTimeout = "30s";
+
   public static void Write(StackConfig config)
   {
     Directory.CreateDirectory(config.ComponentsDir);
@@ -39,6 +44,7 @@ internal static class DaprComponents
       spec:
         type: state.postgresql
         version: v1
+        initTimeout: {InitTimeout}
         metadata:
         - name: connectionString
           value: {YamlString(conn)}
@@ -63,6 +69,7 @@ internal static class DaprComponents
       spec:
         type: pubsub.rabbitmq
         version: v1
+        initTimeout: {InitTimeout}
         metadata:
         - name: connectionString
           value: {YamlString(url)}
