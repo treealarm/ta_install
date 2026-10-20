@@ -128,7 +128,7 @@ internal sealed class SupervisedProcess : IAsyncDisposable
           delay = backoff;
           backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxBackoff.Ticks));
           _log.LogError("{Name} exited with 0x{Code:X8}, restarting in {Delay:0}s (its output: {Log})",
-            Name, LastExitCode, delay.TotalSeconds, Path.Combine("_host", $"{Name}.log"));
+            Name, LastExitCode, delay.TotalSeconds, $"host-logs\\{Name}.log");
         }
       }
 

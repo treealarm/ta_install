@@ -79,13 +79,42 @@ public sealed class StackConfigTests : IDisposable
     Assert.Equal(ports.Count, ports.Distinct().Count());
   }
 
+  // Windows reserves ports above 49152 for Hyper-V, WSL and WinNAT, per machine and per boot; one
+  // there binds on one machine and is "access forbidden" on the next (see windows.env).
+  [Fact]
+  public void Every_fixed_port_is_below_the_windows_dynamic_range()
+  {
+    var config = Load();
+    var ports = new Dictionary<string, int>
+    {
+      ["DAPR_PLACEMENT_PORT"] = config.RequirePort("DAPR_PLACEMENT_PORT"),
+      ["POSTGRES_PORT"] = config.RequirePort("POSTGRES_PORT"),
+      ["RABBITMQ_PORT"] = config.RequirePort("RABBITMQ_PORT"),
+    };
+    foreach (var infra in config.Manifest.Infrastructure)
+    {
+      ports[$"{infra.Name}.readyPort"] = config.ReadyPort(infra);
+      foreach (var arg in config.Infra(infra).Args.Where(a => int.TryParse(a, out _)))
+        ports[$"{infra.Name} {arg}"] = int.Parse(arg);
+    }
+    foreach (var app in config.Manifest.Apps)
+    {
+      ports[$"{app.AppId}.appPort"] = config.AppPort(app);
+      ports[$"{app.AppId}.daprHttpPort"] = app.DaprHttpPort;
+      ports[$"{app.AppId}.daprGrpcPort"] = app.DaprGrpcPort;
+      ports[$"{app.AppId}.daprInternalGrpcPort"] = app.DaprInternalGrpcPort;
+      ports[$"{app.AppId}.metricsPort"] = app.MetricsPort;
+    }
+    Assert.Empty(ports.Where(p => p.Value >= 49152).Select(p => $"{p.Key}={p.Value}"));
+  }
+
   [Fact]
   public void An_app_gets_the_shared_env_plus_its_own_identity_and_sidecar()
   {
     var config = Load();
     var onvif = config.App(config.Manifest.Apps.Single(a => a.AppId == "vmsonvif"));
     Assert.Equal("vmsonvif", onvif.Env["APP_ID"]);
-    Assert.Equal("51003", onvif.Env["DAPR_GRPC_PORT"]);
+    Assert.Equal("41003", onvif.Env["DAPR_GRPC_PORT"]);
     Assert.Equal("3602", onvif.Env["DAPR_HTTP_PORT"]);
     Assert.Equal("vms", onvif.Env["OWN_SERVER_ID"]);
     Assert.Equal("vmscfg", onvif.Env["DAPR_CFG_APP_ID"]);

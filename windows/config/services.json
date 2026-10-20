@@ -3,8 +3,10 @@
 // merged environment (ta_vms.env < windows.env < site.env).
 //
 // Sidecar ports are per app because every sidecar shares one localhost here, unlike in Docker where
-// each sits in its app's network namespace on 3500/50001. They are the ones the F5 setup in ta_vms
-// uses (ta_vms/dotnet/dapr.yaml). The app learns its own through DAPR_GRPC_PORT/DAPR_HTTP_PORT.
+// each sits in its app's network namespace on 3500/50001. They follow the F5 setup in ta_vms
+// (ta_vms/dotnet/dapr.yaml), except the gRPC ones: 41001.. here rather than 51001.., because every
+// fixed port must stay below 49152 on Windows (see windows.env). The app learns its own through
+// DAPR_GRPC_PORT/DAPR_HTTP_PORT.
 //
 // Not here: roitrc and the analytics worker (no Windows build), VmsSquareSingleton (no Square
 // integration on Windows; see windows.env).
@@ -16,7 +18,7 @@
       // Loopback only: every sidecar is on this machine. Health and metrics moved off their
       // defaults (8080, 9090), the two ports most likely to be taken on a customer's machine.
       "args": ["--port", "${DAPR_PLACEMENT_PORT}", "--listen-address", "127.0.0.1",
-               "--healthz-port", "50008", "--healthz-listen-address", "127.0.0.1", "--metrics-port", "9208"],
+               "--healthz-port", "6051", "--healthz-listen-address", "127.0.0.1", "--metrics-port", "9208"],
       "readyPort": "${DAPR_PLACEMENT_PORT}"
     },
     {
@@ -41,28 +43,28 @@
   ],
   "apps": [
     { "appId": "vmscfg", "exe": "dotnet\\VmsCfg\\VmsCfg.exe", "protocol": "grpc", "appPort": "${CFG_VMS_PORT}",
-      "daprHttpPort": 3601, "daprGrpcPort": 51002, "daprInternalGrpcPort": 19012, "metricsPort": 9191, "placement": false },
+      "daprHttpPort": 3601, "daprGrpcPort": 41002, "daprInternalGrpcPort": 19012, "metricsPort": 9191, "placement": false },
     { "appId": "vmsutils", "exe": "dotnet\\VmsUtils\\VmsUtils.exe", "protocol": "grpc", "appPort": "${UTILS_VMS_PORT}",
-      "daprHttpPort": 3606, "daprGrpcPort": 51007, "daprInternalGrpcPort": 19017, "metricsPort": 9196, "placement": false },
+      "daprHttpPort": 3606, "daprGrpcPort": 41007, "daprInternalGrpcPort": 19017, "metricsPort": 9196, "placement": false },
     { "appId": "vmslogger", "exe": "dotnet\\VmsLogger\\VmsLogger.exe", "protocol": "grpc", "appPort": "${LOGGER_VMS_PORT}",
-      "daprHttpPort": 3605, "daprGrpcPort": 51006, "daprInternalGrpcPort": 19016, "metricsPort": 9195, "placement": false },
+      "daprHttpPort": 3605, "daprGrpcPort": 41006, "daprInternalGrpcPort": 19016, "metricsPort": 9195, "placement": false },
     { "appId": "vmsfs", "exe": "dotnet\\VmsFs\\VmsFs.exe", "protocol": "grpc", "appPort": "${FS_VMS_PORT}",
-      "daprHttpPort": 3604, "daprGrpcPort": 51005, "daprInternalGrpcPort": 19015, "metricsPort": 9194, "placement": false },
+      "daprHttpPort": 3604, "daprGrpcPort": 41005, "daprInternalGrpcPort": 19015, "metricsPort": 9194, "placement": false },
     { "appId": "vmssingleton", "exe": "dotnet\\VmsSingleton\\VmsSingleton.exe", "protocol": "grpc", "appPort": "${SINGLETON_VMS_PORT}",
-      "daprHttpPort": 3613, "daprGrpcPort": 51014, "daprInternalGrpcPort": 19024, "metricsPort": 9203, "placement": true },
+      "daprHttpPort": 3613, "daprGrpcPort": 41014, "daprInternalGrpcPort": 19024, "metricsPort": 9203, "placement": true },
     { "appId": "vmsonvif", "exe": "dotnet\\VmsOnvif\\VmsOnvif.exe", "protocol": "grpc", "appPort": "${ONVIF_SRV_PORT}",
-      "daprHttpPort": 3602, "daprGrpcPort": 51003, "daprInternalGrpcPort": 19013, "metricsPort": 9192, "placement": true,
+      "daprHttpPort": 3602, "daprGrpcPort": 41003, "daprInternalGrpcPort": 19013, "metricsPort": 9192, "placement": true,
       "env": { "OWN_SERVER_ID": "vms" } },
     { "appId": "vmsonvif-actors", "exe": "dotnet\\VmsOnvifActors\\VmsOnvifActors.exe", "protocol": "http", "appPort": "${ONVIF_ACTORS_PORT}",
-      "daprHttpPort": 3603, "daprGrpcPort": 51004, "daprInternalGrpcPort": 19014, "metricsPort": 9193, "placement": true,
+      "daprHttpPort": 3603, "daprGrpcPort": 41004, "daprInternalGrpcPort": 19014, "metricsPort": 9193, "placement": true,
       "env": { "OWN_SERVER_ID": "vms" } },
     { "appId": "vmsanalyticssingleton", "exe": "dotnet\\VmsAnalyticsSingleton\\VmsAnalyticsSingleton.exe", "protocol": "grpc", "appPort": "${ANALYTICS_VMS_PORT}",
-      "daprHttpPort": 3610, "daprGrpcPort": 51011, "daprInternalGrpcPort": 19021, "metricsPort": 9200, "placement": false },
+      "daprHttpPort": 3610, "daprGrpcPort": 41011, "daprInternalGrpcPort": 19021, "metricsPort": 9200, "placement": false },
     { "appId": "vmsptztrackingsingleton", "exe": "dotnet\\VmsPtzTrackingSingleton\\VmsPtzTrackingSingleton.exe", "protocol": "grpc", "appPort": "${PTZ_TRACKING_VMS_PORT}",
-      "daprHttpPort": 3616, "daprGrpcPort": 51017, "daprInternalGrpcPort": 19027, "metricsPort": 9206, "placement": true },
+      "daprHttpPort": 3616, "daprGrpcPort": 41017, "daprInternalGrpcPort": 19027, "metricsPort": 9206, "placement": true },
     { "appId": "vms", "exe": "vms\\vms.exe", "protocol": "grpc", "appPort": "${GRPC_VMS_PORT}",
-      "daprHttpPort": 3607, "daprGrpcPort": 51008, "daprInternalGrpcPort": 19018, "metricsPort": 9197, "placement": false },
+      "daprHttpPort": 3607, "daprGrpcPort": 41008, "daprInternalGrpcPort": 19018, "metricsPort": 9197, "placement": false },
     { "appId": "web-vms", "exe": "dotnet\\web_srv.Server\\web_srv.Server.exe", "protocol": "http", "appPort": "${WEB_VMS_PORT}",
-      "daprHttpPort": 3600, "daprGrpcPort": 51001, "daprInternalGrpcPort": 19011, "metricsPort": 9190, "placement": false }
+      "daprHttpPort": 3600, "daprGrpcPort": 41001, "daprInternalGrpcPort": 19011, "metricsPort": 9190, "placement": false }
   ]
 }

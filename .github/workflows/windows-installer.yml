@@ -75,16 +75,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
           Get-Item "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" | Format-List Name, Length
 
+      # Waits for setup.exe itself, not with -Wait: in PowerShell 7 that waits for every descendant,
+      # and installing RabbitMQ leaves epmd.exe running for good. (The uninstall below is the
+      # opposite case: unins000.exe hands over to a copy of itself and exits, so there -Wait is
+      # what waits for the uninstall to finish.)
       - name: Install
+        timeout-minutes: 20
         run: |
-          $setup = Start-Process "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" -Wait -PassThru `
+          $setup = Start-Process "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" -PassThru `
             -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup.log"
+          $null = $setup.Handle # keeps the exit code readable after the process is gone
+          $setup.WaitForExit()
           if ($setup.ExitCode -ne 0) { throw "setup exited with $($setup.ExitCode)" }
           Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ | Format-Table Name, Status, StartType
 
       # Each of these goes browser -> web_srv -> its sidecar -> another app's sidecar -> the app
       # (-> PostgreSQL), so a 200 means name resolution, the components and the databases all work.
       - name: Smoke test
+        timeout-minutes: 10
         run: |
           $hostExe = 'C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe'
           $port = & $hostExe env WEB_VMS_PORT
@@ -106,6 +114,7 @@ jobs:
           if ($restarted) { "::warning::restarted while coming up:`n$($restarted -join "`n")" }
 
       - name: Uninstall
+        timeout-minutes: 10
         run: |
           $u = Start-Process 'C:\Program Files\TreeAlarm VMS\unins000.exe' -Wait -PassThru `
             -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
