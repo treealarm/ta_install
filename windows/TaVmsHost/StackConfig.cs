@@ -94,7 +94,8 @@ internal sealed class StackConfig
       args.AddRange(["--placement-host-address", $"127.0.0.1:{RequirePort("DAPR_PLACEMENT_PORT")}"]);
     }
     var daprd = ResolveExe(@"dapr\daprd.exe");
-    return new ProcessSpec(a.SidecarName, daprd, args, new Dictionary<string, string>(), Path.GetDirectoryName(daprd)!);
+    var env = new Dictionary<string, string> { ["DAPR_HOST_IP"] = Require("DAPR_HOST_IP") };
+    return new ProcessSpec(a.SidecarName, daprd, args, env, Path.GetDirectoryName(daprd)!);
   }
 
   // The whole merged environment, as env_file gives it to every container, plus what is this

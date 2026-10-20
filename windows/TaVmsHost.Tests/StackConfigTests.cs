@@ -165,12 +165,19 @@ public sealed class StackConfigTests : IDisposable
   }
 
   [Fact]
+  public void Sidecars_register_on_the_loopback_through_sqlite()
+  {
+    var config = Load();
+    foreach (var app in config.Manifest.Apps)
+      Assert.Equal("127.0.0.1", config.Sidecar(app).Env["DAPR_HOST_IP"]);
+    Assert.Contains("component: \"sqlite\"", DaprComponents.Configuration(config));
+  }
+
+  [Fact]
   public void Name_resolution_is_validated()
   {
+    File.AppendAllLines(Path.Combine(_data, "config", "site.env"), ["TAVMS_DAPR_NAME_RESOLUTION=mdns"]);
     Assert.Contains("component: \"mdns\"", DaprComponents.Configuration(Load()));
-
-    File.AppendAllLines(Path.Combine(_data, "config", "site.env"), ["TAVMS_DAPR_NAME_RESOLUTION=sqlite"]);
-    Assert.Contains("component: \"sqlite\"", DaprComponents.Configuration(Load()));
 
     File.AppendAllLines(Path.Combine(_data, "config", "site.env"), ["TAVMS_DAPR_NAME_RESOLUTION=consul"]);
     Assert.Throws<InvalidOperationException>(() => DaprComponents.Configuration(Load()));
