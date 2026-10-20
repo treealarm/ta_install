@@ -37,6 +37,8 @@ LZMAUseSeparateProcess=yes
 WizardStyle=modern
 SetupLogging=yes
 UninstallDisplayName=TreeAlarm VMS
+SetupIconFile=ta_vms.ico
+UninstallDisplayIcon={app}\ta_vms.ico
 CloseApplications=no
 
 [InstallDelete]
@@ -56,8 +58,24 @@ Type: filesandordirs; Name: "{app}\setup"
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "ta_vms.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Also needed before the files are copied, to stop a running installation.
 Source: "{#StageDir}\setup\Stop-TaVms.ps1"; Flags: dontcopy
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
+; Both open the web interface: TreeAlarm VMS.url is written by Install-TaVms.ps1, which knows the port.
+[Icons]
+Name: "{autoprograms}\TreeAlarm VMS"; Filename: "{app}\TreeAlarm VMS.url"; IconFilename: "{app}\ta_vms.ico"
+Name: "{autodesktop}\TreeAlarm VMS"; Filename: "{app}\TreeAlarm VMS.url"; IconFilename: "{app}\ta_vms.ico"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\TreeAlarm VMS.url"; Description: "Open TreeAlarm VMS"; \
+  Flags: postinstall shellexec skipifsilent nowait; Check: InstallSucceeded
+
+[UninstallDelete]
+Type: files; Name: "{app}\TreeAlarm VMS.url"
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
@@ -135,6 +153,11 @@ begin
     SuppressibleMsgBox('Setting up the services failed (exit code ' + IntToStr(Code) + '). ' +
       'The log is in ' + DataDir + '\install-logs.', mbCriticalError, MB_OK, IDOK);
   end;
+end;
+
+function InstallSucceeded: Boolean;
+begin
+  Result := not InstallFailed;
 end;
 
 { Lets an unattended install (and CI) see that the post-install step failed. }

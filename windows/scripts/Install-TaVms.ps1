@@ -296,6 +296,28 @@ function Install-HostService {
   Start-Service $HostService
 }
 
+# The Start menu and desktop shortcuts (ta_vms.iss) point at this file rather than at a URL of their
+# own, so the port is read here, from the same env files the service reads, and a port changed in
+# site.env reaches the shortcuts with the next install.
+function New-WebShortcut {
+  $url = "http://localhost:$(Get-StackValue 'WEB_VMS_PORT')/"
+  $lines = '[InternetShortcut]', "URL=$url", "IconFile=$(Join-Path $InstallDir 'ta_vms.ico')", 'IconIndex=0'
+  Set-Content -Path (Join-Path $InstallDir 'TreeAlarm VMS.url') -Value $lines -Encoding ASCII
+}
+
+# So that the "Open TreeAlarm VMS" at the end of the wizard finds a page. Not reaching it is not a
+# failed install: the service keeps starting, and host-logs say why it is slow.
+function Wait-WebInterface([int] $seconds = 180) {
+  $port = [int] (Get-StackValue 'WEB_VMS_PORT')
+  Write-Host "== waiting for the web interface on port $port"
+  $deadline = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $deadline) {
+    $client = New-Object Net.Sockets.TcpClient
+    try { $client.Connect('127.0.0.1', $port); Write-Host 'up'; return } catch { Start-Sleep -Seconds 2 } finally { $client.Dispose() }
+  }
+  Write-Host "WARNING: nothing listens on port $port after $seconds s; see $(Join-Path $DataDir 'host-logs')"
+}
+
 $logDir = Join-Path $DataDir 'install-logs'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 Start-Transcript -Path (Join-Path $logDir ('install-{0:yyyyMMdd-HHmmss}.log' -f (Get-Date))) | Out-Null
@@ -309,6 +331,8 @@ try {
   Install-RabbitMq
   Set-FirewallRules
   Install-HostService
+  New-WebShortcut
+  Wait-WebInterface
   Write-Host ''
   Write-Host "Done. Web UI: http://localhost:$(Get-StackValue 'WEB_VMS_PORT')"
   Write-Host "Service logs: $(Join-Path $DataDir 'host-logs')"
