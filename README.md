@@ -110,16 +110,20 @@ from `video_a/models/`; video_a's CI takes the published `treealarm/analytics-mo
 `video_a/models.tag` (published by `video_a/scripts/push-models-image.sh`).
 
 - `face_detector.xml/.bin` — OMZ face-detection-0205, Apache-2.0.
-- `plate_detector.xml/.bin` — a YOLOv8n single-class licence-plate detector (an Ultralytics
+- `plate_detector.onnx` — a YOLO26n single-class licence-plate detector (an Ultralytics
   fine-tune, AGPL-3.0, see the licensing note below). Locates the plate rectangle; reading the
   characters off it needs `plate_ocr.xml/.bin`, which is not wired up yet, so a plate detection
   carries no text.
-- `primary_detector.xml/.bin` (person/vehicle) — a YOLO11n OpenVINO export.
-- `person_embedder.onnx` (+ `.onnx.data`) — an OSNet body ReID model (256×128 input, 512-d output),
-  used for cross-camera / cross-gap object re-identification that drives event grouping. Without
-  it the worker logs "embedding disabled" and simply emits no embedding; analytics still works,
-  but each detection gets its own (per-track) object id and events group only within a single
-  track.
+- `primary_detector.xml/.bin` (person/vehicle) — a YOLO26s OpenVINO export, about 0.2 s of one CPU
+  core per inference pass (640×640).
+- `person_embedder.xml/.bin` — OMZ person-reidentification-retail-0277, a body ReID model
+  (256×128 input, 256-d output, Apache-2.0), used for cross-camera / cross-gap object
+  re-identification that drives event grouping. Without it the worker logs "embedding disabled"
+  and simply emits no embedding; analytics still works, but each detection gets its own
+  (per-track) object id and events group only within a single track. Every embedding is stamped
+  with the model that made it, and ta_vms compares vectors only within one model: after a change
+  of this model, appearance search does not reach detections recorded under the previous one,
+  and `ANALYTICS_REID_MATCH_MIN_SCORE` needs a value for the new model (0.45 for this one).
 - `face_embedder` — **not bundled**: face re-identification is disabled in the image.
 
 **Licensing:** both YOLO detectors are Ultralytics models under AGPL-3.0, so `video_a` — the
