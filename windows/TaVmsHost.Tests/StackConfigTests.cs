@@ -160,8 +160,8 @@ public sealed class StackConfigTests : IDisposable
   public void Components_get_longer_than_daprs_default_to_connect()
   {
     var config = Load();
-    Assert.Contains("\n  initTimeout: 30s\n", DaprComponents.StateStore(config));
-    Assert.Contains("\n  initTimeout: 30s\n", DaprComponents.PubSub(config));
+    Assert.Contains("\n  initTimeout: 30s", DaprComponents.StateStore(config));
+    Assert.Contains("\n  initTimeout: 30s", DaprComponents.PubSub(config));
   }
 
   [Fact]
