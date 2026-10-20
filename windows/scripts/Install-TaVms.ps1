@@ -45,6 +45,13 @@ function Invoke-Checked([string] $exe, [string[]] $arguments, [int[]] $ok = @(0)
   if ($ok -notcontains $LASTEXITCODE) { throw "$exe $($arguments -join ' ') exited with $LASTEXITCODE" }
 }
 
+# The runtime installers are GUI programs: PowerShell's & neither waits for them nor sets
+# $LASTEXITCODE, so they are started and waited for explicitly.
+function Invoke-Installer([string] $exe, [int[]] $ok = @(0, 3010)) {
+  $process = Start-Process -FilePath $exe -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+  if ($ok -notcontains $process.ExitCode) { throw "$exe exited with $($process.ExitCode)" }
+}
+
 function Grant-Access([string] $path, [string[]] $grants, [switch] $Private) {
   $arguments = @($path)
   if ($Private) { $arguments += '/inheritance:r' }
@@ -99,7 +106,7 @@ function Install-Runtimes {
 
   # Always run: it exits at once with 1638 when this or a newer version is already there.
   Write-Host '== VC++ redistributable'
-  Invoke-Checked (Join-Path $redist 'vc_redist.x64.exe') @('/install', '/quiet', '/norestart') @(0, 1638, 3010)
+  Invoke-Installer (Join-Path $redist 'vc_redist.x64.exe') @(0, 1638, 3010)
 
   # Two installers: the ASP.NET Core one does not carry the .NET runtime it runs on.
   foreach ($runtime in @(@('Microsoft.NETCore.App', 'dotnet-runtime-*.exe'), @('Microsoft.AspNetCore.App', 'aspnetcore-runtime-*.exe'))) {
@@ -111,7 +118,7 @@ function Install-Runtimes {
     }
     $installer = Get-ChildItem $redist -Filter $runtime[1] | Select-Object -First 1
     if (-not $installer) { throw "no $($runtime[1]) in $redist" }
-    Invoke-Checked $installer.FullName @('/install', '/quiet', '/norestart') @(0, 3010)
+    Invoke-Installer $installer.FullName
   }
 }
 
