@@ -51,7 +51,7 @@ jobs:
           gh release view $env:TA_VMS_RELEASE --repo $env:TA_VMS_REPO --json body -q .body
 
       # Third-party downloads are keyed by versions.json: they change only when it does.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/downloads
           key: windows-deps-${{ hashFiles('windows/versions.json') }}
