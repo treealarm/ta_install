@@ -12,6 +12,10 @@ last published with `scripts/push-images.sh` — no source checkouts are needed 
 
 There is also a Windows installer without Docker — see [`windows/README.md`](windows/README.md).
 
+Both are on the [releases page](https://github.com/treealarm/ta_install/releases): the Windows
+installer, and these compose files as `ta_vms-docker.zip` for those who would rather not clone. A
+`vX.Y.Z` tag on this repository publishes one (`.github/workflows/windows-installer.yml`).
+
 ## Run it
 
 ```sh

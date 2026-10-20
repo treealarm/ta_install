@@ -5,12 +5,17 @@
 # prerelease in treealarm/ta_vms, which every push to ta_vms master replaces -- the way the compose
 # stack here runs whatever Docker Hub's :latest is. A new ta_vms build does not trigger this
 # workflow: run it by hand (Actions page, or `gh workflow run windows-installer.yml`).
+#
+# A vX.Y.Z tag also publishes the GitHub release of that version: this installer, once it has
+# passed the checks below, and the compose stack as a zip. The compose files in the zip are frozen at
+# the version, the images they run are not: Docker Hub's :latest, as everywhere else here.
 
 name: windows-installer
 
 on:
   push:
     branches: [main]
+    tags: ["v*"] # path filters do not apply to tag pushes
     paths:
       - windows/**
       - .env
@@ -31,6 +36,8 @@ jobs:
   installer:
     runs-on: windows-latest
     timeout-minutes: 90
+    outputs:
+      ta_vms_commit: ${{ steps.download.outputs.commit }}
     defaults:
       run:
         shell: pwsh
@@ -45,10 +52,14 @@ jobs:
         run: dotnet test windows/TaVmsHost.Tests -c Release --nologo
 
       - name: Download the ta_vms build
+        id: download
         run: |
           gh release download $env:TA_VMS_RELEASE --repo $env:TA_VMS_REPO --pattern $env:TA_VMS_ASSET --dir $env:RUNNER_TEMP
           if ($LASTEXITCODE -ne 0) { throw "cannot download $env:TA_VMS_ASSET from $env:TA_VMS_REPO" }
-          gh release view $env:TA_VMS_RELEASE --repo $env:TA_VMS_REPO --json body -q .body
+          $notes = gh release view $env:TA_VMS_RELEASE --repo $env:TA_VMS_REPO --json body -q .body
+          $notes
+          if (-not ("$notes" -match '\b[0-9a-f]{40}\b')) { throw "no commit in the notes of $env:TA_VMS_RELEASE" }
+          "commit=$($Matches[0])" >> $env:GITHUB_OUTPUT
 
       # Third-party downloads are keyed by versions.json: they change only when it does.
       - uses: actions/cache@v6
@@ -65,12 +76,17 @@ jobs:
 
       - name: Build setup.exe
         run: |
+          $version = "0.0.0.$env:GITHUB_RUN_NUMBER"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "tag '$env:GITHUB_REF_NAME' is not vX.Y.Z" }
+          }
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) {
             choco install innosetup --yes --no-progress
             if ($LASTEXITCODE -ne 0) { throw 'cannot install Inno Setup' }
           }
-          & $iscc /Q "/DStageDir=$env:RUNNER_TEMP\stage" "/DAppVersion=0.1.$env:GITHUB_RUN_NUMBER" `
+          & $iscc /Q "/DStageDir=$env:RUNNER_TEMP\stage" "/DAppVersion=$version" `
             "/DOutputDir=$env:RUNNER_TEMP\out" windows\installer\ta_vms.iss
           if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
           Get-Item "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" | Format-List Name, Length
@@ -148,3 +164,47 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+  release:
+    needs: installer
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TA_VMS_COMMIT: ${{ needs.installer.outputs.ta_vms_commit }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ta_vms-setup-x64
+          path: dist
+
+      # What `docker compose up` reads from this directory, and nothing of the Windows installer.
+      - name: Compose stack
+        run: |
+          git archive --format=zip --prefix=ta_vms/ -o dist/ta_vms-docker.zip HEAD \
+            README.md .env docker-compose.yml docker-compose.gpu.yml.example init_files scripts/prepare-databases.sh
+
+      # A quoted heredoc, so the backticks and backslashes stay as written; envsubst fills in only
+      # the variables it is told about.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export VERSION="${GITHUB_REF_NAME#v}" TAG="$GITHUB_REF_NAME" SHORT_COMMIT="${TA_VMS_COMMIT::7}"
+          envsubst '$TAG $TA_VMS_COMMIT $SHORT_COMMIT' > "$RUNNER_TEMP/notes.md" <<'EOF'
+          **TreeAlarm VMS is a video management system you run yourself.** It records, stores and plays back video from IP cameras over ONVIF and RTSP, streams live video to the browser over WebRTC, and runs on your own hardware with no cloud account. See the [ta_vms README](https://github.com/treealarm/ta_vms#readme).
+
+          ### Downloads
+          - **ta_vms-setup-x64.exe**: Windows installer, no Docker needed (Windows 10 1809 / Server 2019 or later, x64). Installs PostgreSQL, RabbitMQ, MediaMTX, Dapr and every service as native Windows services. It leaves out the analytics worker, ROI re-compression and hardware encoding; see [windows/README.md](https://github.com/treealarm/ta_install/blob/$TAG/windows/README.md). The installer is not code-signed yet, so SmartScreen asks before running it (More info, Run anyway).
+          - **ta_vms-docker.zip**: the Docker Compose stack for Linux, with the analytics worker. Unzip, then `cd ta_vms && docker compose --env-file .env up -d`. It pulls the `treealarm/*:latest` images from Docker Hub, so it always runs the newest build; its README lists the defaults to replace before a real deployment.
+
+          The web interface opens on port 5134, with no login. Uninstalling, or `docker compose down`, keeps the data: `C:\ProgramData\TreeAlarm\VMS` on Windows, `./data` beside the compose file.
+
+          The Windows installer is built from ta_vms [`$SHORT_COMMIT`](https://github.com/treealarm/ta_vms/commit/$TA_VMS_COMMIT).
+          EOF
+          cat "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" dist/ta_vms-setup-x64.exe dist/ta_vms-docker.zip \
+            --verify-tag --title "TreeAlarm VMS $VERSION" --notes-file "$RUNNER_TEMP/notes.md"

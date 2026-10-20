@@ -1,8 +1,10 @@
 # TreeAlarm VMS on Windows, without Docker
 
 `ta_vms-setup-x64.exe` installs the same services the compose stack runs, as native Windows
-processes, on one machine. It is built by `.github/workflows/windows-installer.yml`: download it from
-the latest run's artifacts.
+processes, on one machine. Download it from the
+[latest release](https://github.com/treealarm/ta_install/releases/latest/download/ta_vms-setup-x64.exe).
+`.github/workflows/windows-installer.yml` builds and checks it on every change here, with the run's
+build as an artifact, and publishes it to a release on a `vX.Y.Z` tag.
 
 **Not in the Windows version:** `roitrc` (ROI re-compression of clips) and the analytics worker —
 neither builds for Windows —, the Square integration and the Keycloak login. Live HEVC is
