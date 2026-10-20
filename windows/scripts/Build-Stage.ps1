@@ -19,6 +19,9 @@
     redist\     installers of the .NET, ASP.NET Core and VC++ runtimes
     config\     ta_vms.env (= ../.env), windows.env, services.json
     setup\      the scripts the installer runs
+    licenses\   licence texts the components' own archives do not carry: ta_vms's, those of the
+                vcpkg libraries beside vms.exe (from the ta_vms build), Erlang/OTP's and Dapr's
+    LICENSE.txt, THIRD-PARTY-NOTICES.txt
 
   installer\ta_vms.iss packs that directory as it is.
 #>
@@ -71,6 +74,8 @@ Move-Item (Join-Path $Stage 'ta_vms-tmp\vms') (Join-Path $Stage 'vms')
 Move-Item (Join-Path $Stage 'ta_vms-tmp\dotnet') (Join-Path $Stage 'dotnet')
 New-Item -ItemType Directory -Force (Join-Path $Stage 'redist') | Out-Null
 Move-Item (Join-Path $Stage 'ta_vms-tmp\redist\vc_redist.x64.exe') (Join-Path $Stage 'redist\vc_redist.x64.exe')
+if (-not (Test-Path (Join-Path $Stage 'ta_vms-tmp\licenses\vcpkg'))) { throw 'the ta_vms build carries no licenses\vcpkg: it predates them' }
+Move-Item (Join-Path $Stage 'ta_vms-tmp\licenses') (Join-Path $Stage 'licenses')
 Remove-Item (Join-Path $Stage 'ta_vms-tmp') -Recurse -Force
 Remove-Item (Join-Path $Stage 'dotnet\VmsSquareSingleton') -Recurse -Force -ErrorAction SilentlyContinue
 foreach ($app in (Get-Content (Join-Path $windows 'config\services.json') -Raw | ConvertFrom-Json).apps) {
@@ -110,6 +115,36 @@ Copy-Item (Join-Path $windows 'config\windows.env'), (Join-Path $windows 'config
 $setup = New-Item -ItemType Directory -Force (Join-Path $Stage 'setup')
 Copy-Item (Join-Path $windows 'scripts\Install-TaVms.ps1'), (Join-Path $windows 'scripts\Uninstall-TaVms.ps1'), `
   (Join-Path $windows 'scripts\Stop-TaVms.ps1') $setup
+
+# Licences. Every component is listed with the licence versions.json gives it and the file holding
+# its full text; a component whose file is missing fails the build rather than shipping without it.
+Copy-Item (Join-Path $windows 'licenses\*') (Join-Path $Stage 'licenses')
+Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $Stage 'LICENSE.txt')
+$notices = [Collections.Generic.List[string]]::new()
+$notices.Add('TreeAlarm VMS for Windows is MIT-licensed (LICENSE.txt). It installs the third-party software')
+$notices.Add('below, each under its own licence; paths are relative to the installation directory.')
+$notices.Add('')
+foreach ($component in $versions.PSObject.Properties) {
+  $c = $component.Value
+  if (-not $c.license) { throw "versions.json gives $($component.Name) no licence" }
+  $where = if ($c.licenseFile) {
+    if (-not (Test-Path (Join-Path $Stage $c.licenseFile))) { throw "$($component.Name): no $($c.licenseFile) in the stage" }
+    $c.licenseFile
+  } else { 'installed with the runtime, from redist\' }
+  $notices.Add(('{0} {1}' -f $component.Name, $c.version))
+  $notices.Add("  licence: $($c.license); text: $where")
+  $notices.Add("  from:    $($c.url)")
+}
+$notices.Add('')
+$notices.Add('vms\ (the media server) links libraries built by vcpkg, each listed with its licence in')
+$notices.Add('licenses\vcpkg\. Among them is FFmpeg, built with the GPL encoders x264 and x265, which makes')
+$notices.Add('that build GPL: its source is at https://ffmpeg.org, https://code.videolan.org/videolan/x264')
+$notices.Add('and https://bitbucket.org/multicoreware/x265_git, and the versions built here are those of')
+$notices.Add('the vcpkg baseline pinned in treealarm/ta_vms (.github/workflows/windows.yml, VCPKG_COMMIT).')
+$notices.Add('')
+$notices.Add('dotnet\ holds the .NET services; the NuGet packages published with them are under their own')
+$notices.Add('licences, named on nuget.org for each package.')
+Set-Content -Path (Join-Path $Stage 'THIRD-PARTY-NOTICES.txt') -Value $notices -Encoding ascii
 
 $size = (Get-ChildItem $Stage -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ("staged {0:N0} MB in {1}" -f ($size / 1MB), $Stage)

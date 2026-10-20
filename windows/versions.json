@@ -3,12 +3,18 @@
 // every download is checked against its hash (the GitHub release digest where there is one).
 // scripts/Build-Stage.ps1 downloads, verifies and unpacks them.
 //
+// license and licenseFile feed THIRD-PARTY-NOTICES.txt, which Build-Stage.ps1 writes; licenseFile
+// is where the full text sits in the installation, and the build fails if it is not there. The two
+// runtime installers carry their own licences and install them with the runtime.
+//
 // Bumping one: change url and hash together. RabbitMQ and Erlang/OTP move as a pair — see
 // https://www.rabbitmq.com/docs/which-erlang (4.3 needs Erlang 27.0 or later). PostgreSQL stays on
 // one major: a new major needs pg_upgrade of the installed data, which the installer does not do.
 {
   "postgresql": {
     "version": "18.6-1",
+    "license": "PostgreSQL License",
+    "licenseFile": "pgsql\\server_license.txt",
     "url": "https://get.enterprisedb.com/postgresql/postgresql-18.6-1-windows-x64-binaries.zip",
     "sha256": "fbe23da234ee31547bf8a36d29dfd81e82b849df2d2b78d2eecb43d360252f8c"
   },
@@ -17,26 +23,36 @@
   // toolset that compiled vms.exe, and is new enough for Erlang and PostgreSQL too.
   "erlang": {
     "version": "28.5.0.7",
+    "license": "Apache-2.0",
+    "licenseFile": "licenses\\Erlang-OTP.txt",
     "url": "https://github.com/erlang/otp/releases/download/OTP-28.5.0.7/otp_win64_28.5.0.7.zip",
     "sha256": "9ff998d7a612b6697f6f737078783557bced63e5bf2a96a9d5f7d7d2a840cb98"
   },
   "rabbitmq": {
     "version": "4.3.6",
+    "license": "MPL-2.0, with the licences of the libraries it bundles beside it",
+    "licenseFile": "rabbitmq\\LICENSE.txt",
     "url": "https://github.com/rabbitmq/rabbitmq-server/releases/download/v4.3.6/rabbitmq-server-windows-4.3.6.zip",
     "sha256": "48161b084f1257edc112b24fccda378cc3e83c8e4b94984801cd6651817981f1"
   },
   "daprd": {
     "version": "1.18.7",
+    "license": "Apache-2.0",
+    "licenseFile": "licenses\\Dapr.txt",
     "url": "https://github.com/dapr/dapr/releases/download/v1.18.7/daprd_windows_amd64.zip",
     "sha256": "3bba7e9808b3c83383628a3c022045b45328d3a8700c85c95788fb3a05fa1cd9"
   },
   "placement": {
     "version": "1.18.7",
+    "license": "Apache-2.0",
+    "licenseFile": "licenses\\Dapr.txt",
     "url": "https://github.com/dapr/dapr/releases/download/v1.18.7/placement_windows_amd64.zip",
     "sha256": "12f737737e19992d2a33fdd10fe5b72c2aa666b2d0886a6c6936c4eea683c41f"
   },
   "mediamtx": {
     "version": "1.21.2",
+    "license": "MIT",
+    "licenseFile": "mediamtx\\LICENSE",
     "url": "https://github.com/bluenviron/mediamtx/releases/download/v1.21.2/mediamtx_v1.21.2_windows_amd64.zip",
     "sha256": "a84224f5a490855684e62ba6fb71e80ea2a5e16aed61883bb58380290e93e467"
   },
@@ -44,11 +60,13 @@
   // the ASP.NET Core installer does not carry the .NET runtime underneath it.
   "dotnet": {
     "version": "10.0.13",
+    "license": "MIT",
     "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.13/dotnet-runtime-10.0.13-win-x64.exe",
     "sha512": "44da78e619ae23e352e81fbc3a5803d78b1375dff89c176dd17a884d4e42e17850bb7adb78c799ca15b2127b67529395df1143976e33f6c8157f53bfc5a42e62"
   },
   "aspnetcore": {
     "version": "10.0.13",
+    "license": "MIT",
     "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.13/aspnetcore-runtime-10.0.13-win-x64.exe",
     "sha512": "680bf274a7ecc1818d49e1845072aa3064102992fb00547965107938ff6808ea35f832c46f1b4e05231cae47e40e746419c024e5622f7a1254c0dcb946c5c07c"
   }

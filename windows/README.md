@@ -104,3 +104,11 @@ ta_vms build: `gh workflow run windows-installer.yml`.
   only (web_srv proxies WHEP), and RTMP, HLS and SRT — which nothing uses — are off.
 - **Versions are pinned** (`versions.json`) where compose follows `latest`: an installer carries
   the binaries.
+
+## Licences
+
+The installation directory holds `LICENSE.txt` (TreeAlarm VMS, MIT) and `THIRD-PARTY-NOTICES.txt`,
+which names every bundled component with its licence and the file holding the full text: the
+components' own where their archives carry one, `licenses\` for the rest, `licenses\vcpkg\` for the
+libraries beside `vms.exe`. `scripts/Build-Stage.ps1` writes it from `versions.json` and fails if a
+named file is missing.

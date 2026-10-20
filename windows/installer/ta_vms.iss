@@ -55,6 +55,7 @@ Type: filesandordirs; Name: "{app}\rabbitmq"
 Type: filesandordirs; Name: "{app}\redist"
 Type: filesandordirs; Name: "{app}\config"
 Type: filesandordirs; Name: "{app}\setup"
+Type: filesandordirs; Name: "{app}\licenses"
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
