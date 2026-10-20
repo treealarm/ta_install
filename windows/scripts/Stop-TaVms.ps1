@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Run by the installer before it copies files (an upgrade) and by Uninstall-TaVms.ps1. Stops the
-  services in dependency order, then ends anything still running from the installation directory:
+  services in dependency order, then ends anything still running from its component directories:
   epmd, which the Erlang runtime leaves behind when RabbitMQ stops, and any child a crashed
   supervisor did not take down with it. Windows PowerShell 5.1.
 #>
@@ -23,13 +23,18 @@ foreach ($name in 'TaVmsHost', 'TaVms.RabbitMQ', 'TaVms.Postgres') {
   }
 }
 
-$prefix = (Resolve-Path $InstallDir -ErrorAction SilentlyContinue)
-if ($prefix) {
-  $prefix = $prefix.Path.TrimEnd('\') + '\'
-  Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
-    ForEach-Object {
-      Write-Host "ending $($_.Name) ($($_.Id))"
-      Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-    }
+# Only the component directories: the installation directory itself holds unins000.exe, which is
+# the very process running this script during an uninstall.
+$root = Resolve-Path $InstallDir -ErrorAction SilentlyContinue
+if ($root) {
+  $prefixes = 'host', 'vms', 'dotnet', 'dapr', 'mediamtx', 'pgsql', 'erlang', 'rabbitmq' |
+    ForEach-Object { (Join-Path $root.Path $_) + '\' }
+  Get-Process | Where-Object {
+    $path = $_.Path
+    $path -and ($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) })
+  } | ForEach-Object {
+    Write-Host "ending $($_.Name) ($($_.Id))"
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+  }
 }
 exit 0
