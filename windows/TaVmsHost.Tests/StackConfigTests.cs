@@ -30,6 +30,7 @@ public sealed class StackConfigTests : IDisposable
       "RABBITMQ_DEFAULT_PASS=p@ss/word",
       "VMS_MEDIAMTX_PUBLISH_PASS=pub",
       "VMS_MEDIAMTX_READ_PASS=read",
+      "KEYCLOAK_ADMIN_PASSWORD=kc-admin",
       @"VMS_STORAGE_BASE_PATH=D:\Archive",
     ]);
   }
@@ -187,7 +188,7 @@ public sealed class StackConfigTests : IDisposable
   public void Every_database_the_env_names_is_found()
   {
     var names = Infrastructure.DatabaseNames(Load().Env, NullLogger.Instance).Select(n => n.Name).ToList();
-    Assert.Equal(["ta_analytics", "ta_cfg", "ta_fs", "ta_state"], names);
+    Assert.Equal(["ta_analytics", "ta_cfg", "ta_fs", "ta_keycloak", "ta_state"], names);
   }
 
   private static string FindRepoRoot()
