@@ -58,10 +58,12 @@ Type: filesandordirs; Name: "{app}\setup"
 Type: filesandordirs; Name: "{app}\licenses"
 
 [Files]
+; Needed before the files are copied, to stop a running installation. First, because the archive is
+; solid: extracting a file means decompressing everything in front of it, and at the end of the list
+; that was the whole 1.9 GB stage — 38 s of an upgrade spent before anything was stopped.
+Source: "{#StageDir}\setup\Stop-TaVms.ps1"; Flags: dontcopy
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "ta_vms.ico"; DestDir: "{app}"; Flags: ignoreversion
-; Also needed before the files are copied, to stop a running installation.
-Source: "{#StageDir}\setup\Stop-TaVms.ps1"; Flags: dontcopy
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"

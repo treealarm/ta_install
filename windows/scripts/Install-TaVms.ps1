@@ -40,6 +40,9 @@ $PostgresService = 'TaVms.Postgres'
 $RabbitService = 'TaVms.RabbitMQ'
 $FirewallGroup = 'TreeAlarm VMS'
 
+# A step marker with the time, so a transcript shows where an install spent its minutes.
+function Write-Step([string] $what) { Write-Host ('== {0:HH:mm:ss} {1}' -f (Get-Date), $what) }
+
 function Invoke-Checked([string] $exe, [string[]] $arguments, [int[]] $ok = @(0)) {
   & $exe @arguments
   if ($ok -notcontains $LASTEXITCODE) { throw "$exe $($arguments -join ' ') exited with $LASTEXITCODE" }
@@ -104,13 +107,23 @@ function Wait-Until([string] $what, [int] $seconds, [scriptblock] $test) {
 function Install-Runtimes {
   $redist = Join-Path $InstallDir 'redist'
 
-  # Always run: it exits at once with 1638 when this or a newer version is already there.
-  Write-Host '== VC++ redistributable'
-  Invoke-Installer (Join-Path $redist 'vc_redist.x64.exe') @(0, 1638, 3010)
+  # Skipped when this or a newer version is already there. Run anyway, it does exit with 1638 then,
+  # but only after trying to create a System Restore point: 90 s on the test machine, the largest
+  # single step of an upgrade.
+  Write-Step 'VC++ redistributable'
+  $vcRedist = Join-Path $redist 'vc_redist.x64.exe'
+  $bundled = [version] (Get-Item $vcRedist).VersionInfo.FileVersion
+  $vcRuntime = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64' -ErrorAction SilentlyContinue
+  if ($vcRuntime -and $vcRuntime.Installed -eq 1 -and
+      [version]::new($vcRuntime.Major, $vcRuntime.Minor, $vcRuntime.Bld, $vcRuntime.Rbld) -ge $bundled) {
+    Write-Host "   $($vcRuntime.Version) already installed"
+  } else {
+    Invoke-Installer $vcRedist @(0, 1638, 3010)
+  }
 
   # Two installers: the ASP.NET Core one does not carry the .NET runtime it runs on.
   foreach ($runtime in @(@('Microsoft.NETCore.App', 'dotnet-runtime-*.exe'), @('Microsoft.AspNetCore.App', 'aspnetcore-runtime-*.exe'))) {
-    Write-Host "== $($runtime[0]) 10"
+    Write-Step "$($runtime[0]) 10"
     $shared = Join-Path $env:ProgramFiles "dotnet\shared\$($runtime[0])"
     if (Get-ChildItem $shared -Directory -Filter '10.*' -ErrorAction SilentlyContinue) {
       Write-Host '   already installed'
@@ -124,10 +137,10 @@ function Install-Runtimes {
 
 function New-SiteEnv([string] $path) {
   if (Test-Path $path) {
-    Write-Host "== $path exists, kept"
+    Write-Step "$path exists, kept"
     return
   }
-  Write-Host "== writing $path"
+  Write-Step "writing $path"
   $lines = @(
     '# This installation''s own settings, written once by the installer and kept by upgrades.',
     '# Overrides ta_vms.env and windows.env in the installation directory. TaVmsHost reads it on',
@@ -152,7 +165,7 @@ function New-SiteEnv([string] $path) {
 }
 
 function Initialize-DataDirectories {
-  Write-Host '== data directories'
+  Write-Step 'data directories'
   foreach ($d in 'config', 'dapr', 'postgres', 'rabbitmq', 'logs', 'host-logs') {
     New-Item -ItemType Directory -Force (Join-Path $DataDir $d) | Out-Null
   }
@@ -176,7 +189,7 @@ function Initialize-DataDirectories {
 }
 
 function Install-Postgres {
-  Write-Host '== PostgreSQL'
+  Write-Step 'PostgreSQL'
   $bin = Join-Path $InstallDir 'pgsql\bin'
   $data = Join-Path $DataDir 'postgres'
   $port = Get-StackValue 'POSTGRES_PORT'
@@ -207,7 +220,7 @@ function Install-Postgres {
 }
 
 function Install-RabbitMq {
-  Write-Host '== RabbitMQ'
+  Write-Step 'RabbitMQ'
   $sbin = Join-Path $InstallDir 'rabbitmq\sbin'
   $base = Join-Path $DataDir 'rabbitmq'
   # Read by the .bat scripts below. The service keeps what it was installed with, so there is no
@@ -264,7 +277,7 @@ function Install-RabbitMq {
 }
 
 function Set-FirewallRules {
-  Write-Host '== firewall'
+  Write-Step 'firewall'
   Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue | Remove-NetFirewallRule
   # Any profile: a camera network without a gateway is "unidentified", which Windows files as Public.
   $common = @{ Group = $FirewallGroup; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
@@ -280,7 +293,7 @@ function Set-FirewallRules {
 }
 
 function Install-HostService {
-  Write-Host '== TreeAlarm VMS service'
+  Write-Step 'TreeAlarm VMS service'
   $exe = Join-Path $InstallDir 'host\TaVmsHost.exe'
   if (-not (Get-Service $HostService -ErrorAction SilentlyContinue)) {
     New-Service -Name $HostService -DisplayName 'TreeAlarm VMS' -StartupType Automatic `
@@ -309,7 +322,7 @@ function New-WebShortcut {
 # failed install: the service keeps starting, and host-logs say why it is slow.
 function Wait-WebInterface([int] $seconds = 180) {
   $port = [int] (Get-StackValue 'WEB_VMS_PORT')
-  Write-Host "== waiting for the web interface on port $port"
+  Write-Step "waiting for the web interface on port $port"
   $deadline = (Get-Date).AddSeconds($seconds)
   while ((Get-Date) -lt $deadline) {
     $client = New-Object Net.Sockets.TcpClient
