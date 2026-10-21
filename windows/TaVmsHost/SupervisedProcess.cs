@@ -72,6 +72,9 @@ internal sealed class SupervisedProcess : IAsyncDisposable
     await StopProcessAsync(timeout);
   }
 
+  // From here on an exit is final. The process itself is stopped later, by StopAsync.
+  public void StopRestarting() => _stopping?.Cancel();
+
   public async Task StopAsync(TimeSpan timeout)
   {
     if (_stopping is null) return;

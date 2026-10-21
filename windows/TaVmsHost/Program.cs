@@ -13,6 +13,7 @@
 // The installation lives in the directory above this executable (<home>\host\TaVmsHost.exe); its
 // data in --data, %ProgramData%\TreeAlarm\VMS unless told otherwise.
 
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -95,7 +96,19 @@ static async Task<int> RunAsync(string home, string data)
     builder.Services.AddHostedService(sp => sp.GetRequiredService<Supervisor>());
     builder.Services.AddHostedService<ControlPipe>();
 
-    await builder.Build().RunAsync();
+    var host = builder.Build();
+    // Windows tells every console process that it is shutting down (CTRL_SHUTDOWN_EVENT, SIGTERM to
+    // .NET) about as soon as the shutdown starts; the children, each on a hidden console of its own,
+    // exit on it. The SCM's own stop reaches this service only after it has notified the services
+    // before it -- 20 s later on the test machine, all of which the supervisor spent restarting
+    // children. The same event reaches this process, so the stop starts from it.
+    using var shutdown = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+    {
+      context.Cancel = true;
+      Log.Information("Windows is shutting down: stopping the stack");
+      host.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+    });
+    await host.RunAsync();
     return Environment.ExitCode;
   }
   catch (Exception ex)

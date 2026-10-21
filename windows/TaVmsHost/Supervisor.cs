@@ -74,6 +74,10 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
 
   public override async Task StopAsync(CancellationToken cancellationToken)
   {
+    // Every process at once, before the tiers below: at system shutdown Windows has already told
+    // each child to exit, and one that does so while an earlier tier is still stopping must not be
+    // started again.
+    foreach (var process in All) process.StopRestarting();
     await base.StopAsync(cancellationToken);
 
     // In parallel within each tier: the SCM allows a service about 20 seconds at system shutdown.
