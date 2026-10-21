@@ -43,7 +43,8 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
       {
         var process = Add(_infra, config.Infra(spec));
         process.Start();
-        await WaitForPortAsync(spec.Name, config.ReadyPort(spec), InfraReadyTimeout, stoppingToken);
+        if (config.ReadyPort(spec) is int port)
+          await WaitForPortAsync(spec.Name, port, InfraReadyTimeout, stoppingToken);
       }
 
       foreach (var app in config.Manifest.Apps)

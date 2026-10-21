@@ -94,7 +94,7 @@ public sealed class StackConfigTests : IDisposable
     };
     foreach (var infra in config.Manifest.Infrastructure)
     {
-      ports[$"{infra.Name}.readyPort"] = config.ReadyPort(infra);
+      if (config.ReadyPort(infra) is int ready) ports[$"{infra.Name}.readyPort"] = ready;
       foreach (var arg in config.Infra(infra).Args.Where(a => int.TryParse(a, out _)))
         ports[$"{infra.Name} {arg}"] = int.Parse(arg);
     }

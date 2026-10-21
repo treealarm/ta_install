@@ -63,8 +63,9 @@
         "KEYCLOAK_CLIENT_ID": "${KEYCLOAK_CLIENT_ID}",
         // Keycloak sizes its heap from the machine's memory (70%) when given no limit.
         "JAVA_OPTS_KC_HEAP": "-Xms64m -Xmx512m"
-      },
-      "readyPort": "${KEYCLOAK_PORT}"
+      }
+      // No readyPort: the services after it do not need it, and waiting for its 20-50 s start would
+      // hold back recording after every boot.
     }
   ],
   "apps": [

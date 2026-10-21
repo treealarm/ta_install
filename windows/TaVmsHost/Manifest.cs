@@ -37,13 +37,15 @@ internal sealed record Manifest(
   }
 }
 
-// placement and MediaMTX: no sidecar, ready once ReadyPort accepts a connection.
+// placement, MediaMTX, Keycloak: no sidecar. The next process starts once ReadyPort accepts a
+// connection, or at once when there is none: nothing else waits for Keycloak, which only web-vms
+// calls, and only when somebody logs in.
 internal sealed record InfraProcess(
   string Name,
   string Exe,
   IReadOnlyList<string>? Args,
   IReadOnlyDictionary<string, string>? Env,
-  string ReadyPort);
+  string? ReadyPort);
 
 internal sealed record DaprApp(
   string AppId,

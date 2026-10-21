@@ -59,7 +59,8 @@ internal sealed class StackConfig
 
   public string Expand(string value, string where) => EnvFile.Expand(value, Env, where);
 
-  public int ReadyPort(InfraProcess p) => ParsePort(Expand(p.ReadyPort, $"services.json {p.Name}.readyPort"), $"{p.Name}.readyPort");
+  public int? ReadyPort(InfraProcess p) =>
+    p.ReadyPort is null ? null : ParsePort(Expand(p.ReadyPort, $"services.json {p.Name}.readyPort"), $"{p.Name}.readyPort");
 
   public int AppPort(DaprApp a) => ParsePort(Expand(a.AppPort, $"services.json {a.AppId}.appPort"), $"{a.AppId}.appPort");
 
