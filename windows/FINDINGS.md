@@ -3,6 +3,53 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-21: v0.1.5, upgraded from v0.1.4
+
+The first release with Keycloak and user administration (multitenant_admin). Upgrade
+`/VERYSILENT`: **216 s**. setup.exe is 477 MB, Keycloak and its Java runtime being the difference.
+
+| Phase | 0.1.4 | 0.1.5 |
+|---|---|---|
+| loader, extracting `Stop-TaVms.ps1` | 5 s | 8 s |
+| stopping the services | 12 s | 12 s |
+| deleting the old directories | 9 s | 2 s |
+| unpacking | 64 s | 106 s |
+| site.env, data directories, PostgreSQL | | 4 s |
+| RabbitMQ | 26 s | 29 s |
+| firewall, service, web interface up | 29 s | 54 s |
+
+The last row grew because Keycloak's JVM starts beside the 24 other processes and takes the CPU
+from them: they came up in 35 s, not 27. Nothing waits for Keycloak itself.
+
+- **Keycloak.** First start 49 s, 21 of them creating its schema in the new `ta_keycloak`
+  database, then the realm imported; later starts 16-18 s. 443 MB working set, all of the
+  installation's processes 3.2 GB (2.6 GB before).
+- **It listened on the LAN.** Keycloak's `start` defaults to a clustered cache, and JGroups bound
+  `192.168.1.100:7800` and `*:57800` to look for other Keycloak nodes. Fixed: `KC_CACHE=local`
+  (a runtime option; `kc build --cache=local` is not persisted). Since then it listens on the
+  loopback only, takes 364 MB and starts in 16 s.
+- **Every service stop waited 5 s on `kc.bat`.** Ctrl+C stopped Keycloak's java in 1.1 s, and then
+  cmd asked "Terminate batch job (Y/N)?" on its hidden console, until the supervisor gave up and
+  killed it. Fixed: the supervisor hands every child an empty stdin, and cmd, reading its end,
+  finishes the batch at once (0.1 s, tried in a SYSTEM task as the service runs).
+- **vms was killed on every stop**, here and in every earlier log: "vms did not stop within 8s".
+  Not Windows: the same 26 s on Linux, with the cameras stopped one at a time and each reader
+  waiting out a 5 s reconnect pause or socket timeout. Fixed in ta_vms 86629d4: 0.8 s while
+  recording, with the open clip closed and complete.
+- `site.env` got `KEYCLOAK_ADMIN_PASSWORD` added, nothing else in it changed.
+- Over the LAN, from another machine: without a token every API answers 401, including
+  `/api/media-mtx/servers`, which used to hand out the MediaMTX passwords. `admin`/`admin` logs in
+  and gets 403 `password_change_required` for everything but the change; a password shorter than 8
+  is refused; after the change all seven cameras are there and `admin`/`admin` no longer works.
+- multitenant_admin on 8013, from the LAN: reports standalone mode and realm `tavms`; created an
+  operator, who was made to change the password in TreeAlarm VMS, saw no cameras (none granted)
+  and was refused by the console as not an administrator; deleted again. The administrator cannot
+  delete their own account.
+- Live WebRTC with a Keycloak token: first frame in 2.6 s. Recording resumed a minute after the
+  simulator came back.
+- The machine went off at 15:37 that day. Not a crash: winlogon powered it off on behalf of SYSTEM
+  (event 1074), and TaVmsHost stopped everything within 9 s.
+
 ## 2026-10-21: v0.1.4, upgraded from v0.1.3
 
 The fixes found below, on the same machine. Upgrade `/VERYSILENT`: **152 s** (0.1.3: 376 s).
