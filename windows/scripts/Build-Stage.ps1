@@ -93,17 +93,30 @@ Expand-Into (Get-Component 'placement') (Join-Path $Stage 'dapr')
 Expand-Into (Get-Component 'mediamtx') (Join-Path $Stage 'mediamtx')
 Copy-Item (Join-Path $repo 'init_files\config\mediamtx.yml') (Join-Path $Stage 'mediamtx\mediamtx.yml') -Force
 
-# PostgreSQL, without the 300 MB of pgAdmin and the rest nobody on a server needs.
+# PostgreSQL, without pgAdmin (the archive's directory is "pgAdmin 4": 680 MB in 16 000 files, which
+# by itself made unpacking take minutes) and the rest nobody on a server needs.
 Expand-Into (Get-Component 'postgresql') (Join-Path $Stage 'pgsql') 'pgsql'
-foreach ($extra in 'pgAdmin', 'StackBuilder', 'doc', 'include', 'symbols') {
-  Remove-Item (Join-Path $Stage "pgsql\$extra") -Recurse -Force -ErrorAction SilentlyContinue
-}
+Get-ChildItem (Join-Path $Stage 'pgsql') -Directory |
+  Where-Object { $_.Name -like 'pgAdmin*' -or $_.Name -in 'StackBuilder', 'doc', 'include', 'symbols' } |
+  Remove-Item -Recurse -Force
 Get-ChildItem (Join-Path $Stage 'pgsql') -Filter '*_3rd_party_licenses.txt' | Where-Object Name -notlike 'commandlinetools*' | Remove-Item
 Remove-Item (Join-Path $Stage 'pgsql\pgAdmin_license.txt') -ErrorAction SilentlyContinue
 
 # Erlang, without its own VC++ redistributable (see versions.json), and RabbitMQ.
 Expand-Into (Get-Component 'erlang') (Join-Path $Stage 'erlang')
 Remove-Item (Join-Path $Stage 'erlang\doc'), (Join-Path $Stage 'erlang\vc_redist.exe') -Recurse -Force -ErrorAction SilentlyContinue
+# Debug symbols, documentation, sources and examples: a third of the archive's size and two thirds of
+# its files, none of it read at run time.
+Get-ChildItem (Join-Path $Stage 'erlang') -Recurse -File -Filter '*.pdb' | Remove-Item -Force
+Get-ChildItem (Join-Path $Stage 'erlang') -Directory | Where-Object Name -like 'erts-*' |
+  ForEach-Object { Join-Path $_.FullName 'doc'; Join-Path $_.FullName 'man'; Join-Path $_.FullName 'src' } |
+  Where-Object { Test-Path $_ } | Remove-Item -Recurse -Force
+Get-ChildItem (Join-Path $Stage 'erlang\lib') -Directory | ForEach-Object {
+  foreach ($extra in 'doc', 'src', 'examples') {
+    $dir = Join-Path $_.FullName $extra
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+  }
+}
 Expand-Into (Get-Component 'rabbitmq') (Join-Path $Stage 'rabbitmq') "rabbitmq_server-$($versions.rabbitmq.version)"
 
 Copy-Item (Get-Component 'dotnet'), (Get-Component 'aspnetcore') (Join-Path $Stage 'redist')
@@ -146,5 +159,16 @@ $notices.Add('dotnet\ holds the .NET services; the NuGet packages published with
 $notices.Add('licences, named on nuget.org for each package.')
 Set-Content -Path (Join-Path $Stage 'THIRD-PARTY-NOTICES.txt') -Value $notices -Encoding ascii
 
+# Per component, and with a ceiling for the two whose archives carry far more than a server needs:
+# a renamed directory in a new upstream archive must fail the build, not ship another 700 MB.
+$ceilingMb = @{ pgsql = 300; erlang = 250 }
+foreach ($dir in Get-ChildItem $Stage -Directory) {
+  $files = Get-ChildItem $dir.FullName -Recurse -File
+  $mb = ($files | Measure-Object Length -Sum).Sum / 1MB
+  Write-Host ("  {0,-10} {1,6:N0} MB {2,6} files" -f $dir.Name, $mb, $files.Count)
+  if ($ceilingMb.ContainsKey($dir.Name) -and $mb -gt $ceilingMb[$dir.Name]) {
+    throw "$($dir.Name) is $([int]$mb) MB, over its $($ceilingMb[$dir.Name]) MB ceiling: something the pruning above should remove is back"
+  }
+}
 $size = (Get-ChildItem $Stage -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ("staged {0:N0} MB in {1}" -f ($size / 1MB), $Stage)
