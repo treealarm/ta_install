@@ -12,9 +12,11 @@ CPU: there is no hardware encoder for Windows yet.
 
 **Login** goes through a Keycloak that the installer ships with its Java runtime, on the loopback
 (`127.0.0.1:5160`). The first sign-in is `admin` / `admin`, and the web UI makes that account set a
-new password before anything else. Keycloak's own administrator is `admin` with the password
-generated into `site.env` (`KEYCLOAK_ADMIN_PASSWORD`); its console, at `http://127.0.0.1:5160` on
-this machine, is where users are created (realm `tavms`, role `admin` for administrators).
+new password before anything else. Users are added at `http://<this machine>:8013` (`mt_admin`), by the
+web UI's administrators: new users, password resets, the administrator role; a new user sets their
+own password at the first sign-in. Keycloak's own administrator is `admin` with the password
+generated into `site.env` (`KEYCLOAK_ADMIN_PASSWORD`); its console is at `http://127.0.0.1:5160` on
+this machine.
 
 ## Install
 

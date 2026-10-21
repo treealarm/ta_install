@@ -306,6 +306,8 @@ function Set-FirewallRules {
   $common = @{ Group = $FirewallGroup; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
   New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - web' -Protocol TCP -LocalPort (Get-StackValue 'WEB_VMS_PORT') `
     -Program (Join-Path $InstallDir 'dotnet\web_srv.Server\web_srv.Server.exe') | Out-Null
+  New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - users' -Protocol TCP -LocalPort (Get-StackValue 'MT_ADMIN_PORT') `
+    -Program (Join-Path $InstallDir 'mt_admin\mt_admin.Server.exe') | Out-Null
   New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - RTSP' -Protocol TCP -LocalPort 8554 `
     -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
   New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - WebRTC media' -Protocol UDP -LocalPort 8189 `

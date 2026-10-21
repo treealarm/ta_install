@@ -35,9 +35,12 @@ come up together. The first start takes longer while images are pulled.
 
 **Login.** The stack runs its own Keycloak (`keycloak` service; its console on
 `http://127.0.0.1:8180`, `KEYCLOAK_PORT`). The first sign-in is `admin` / `admin`, and the web UI
-makes that account set a new password before anything else. Users are created in Keycloak's
-console, realm `tavms`: give administrators the realm role `admin`; everyone else sees only the
-cameras granted to them on the Permissions page.
+makes that account set a new password before anything else.
+
+**Users** are added at `http://<host>:8013` (`MT_ADMIN_PORT`, the `mt_admin` service), by the
+administrators of the web UI: new users, password resets, the administrator role. A new user, and
+one whose password was reset, sets their own password at the next sign-in. Non-administrators see
+only the cameras granted to them on the web UI's Permissions page.
 
 Square integration is **off by default**: the `SQUARE_*` vars are empty in `.env`, so nothing is
 pushed to Square.

@@ -66,6 +66,21 @@
       }
       // No readyPort: the services after it do not need it, and waiting for its 20-50 s start would
       // hold back recording after every boot.
+    },
+    {
+      // User administration: multitenant_admin in its standalone mode, for this realm's
+      // administrators. Reachable from the LAN (a firewall rule), behind its own login.
+      "name": "mt_admin",
+      "exe": "mt_admin\\mt_admin.Server.exe",
+      "env": {
+        "MT_ADMIN_REALM": "${KEYCLOAK_REALM_NAME}",
+        "KEYCLOAK_URL": "${KEYCLOAK_URL}",
+        "KEYCLOAK_ADMIN_USER": "${KEYCLOAK_ADMIN_USER}",
+        "KEYCLOAK_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD}",
+        "KEYCLOAK_CLIENT_ID": "${KEYCLOAK_CLIENT_ID}",
+        "HTTP_ADMIN_PORT": "${MT_ADMIN_PORT}",
+        "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT": "1"
+      }
     }
   ],
   "apps": [

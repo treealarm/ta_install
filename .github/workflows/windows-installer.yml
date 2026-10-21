@@ -30,6 +30,8 @@ env:
   TA_VMS_REPO: treealarm/ta_vms
   TA_VMS_RELEASE: windows-build
   TA_VMS_ASSET: ta_vms-windows-x64.zip
+  MT_ADMIN_REPO: treealarm/multitenant_admin
+  MT_ADMIN_ASSET: mt_admin-windows-x64.zip
   GH_TOKEN: ${{ github.token }}
 
 jobs:
@@ -38,6 +40,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       ta_vms_commit: ${{ steps.download.outputs.commit }}
+      mt_admin_commit: ${{ steps.download.outputs.mt_admin_commit }}
     defaults:
       run:
         shell: pwsh
@@ -61,6 +64,12 @@ jobs:
           if (-not ("$notes" -match '\b[0-9a-f]{40}\b')) { throw "no commit in the notes of $env:TA_VMS_RELEASE" }
           "commit=$($Matches[0])" >> $env:GITHUB_OUTPUT
 
+          gh release download windows-build --repo $env:MT_ADMIN_REPO --pattern $env:MT_ADMIN_ASSET --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw "cannot download $env:MT_ADMIN_ASSET from $env:MT_ADMIN_REPO" }
+          $notes = gh release view windows-build --repo $env:MT_ADMIN_REPO --json body -q .body
+          if (-not ("$notes" -match '\b[0-9a-f]{40}\b')) { throw "no commit in the notes of $env:MT_ADMIN_REPO windows-build" }
+          "mt_admin_commit=$($Matches[0])" >> $env:GITHUB_OUTPUT
+
       # Third-party downloads are keyed by versions.json: they change only when it does.
       - uses: actions/cache@v6
         with:
@@ -71,6 +80,7 @@ jobs:
         run: |
           .\windows\scripts\Build-Stage.ps1 `
             -TaVmsZip (Join-Path $env:RUNNER_TEMP $env:TA_VMS_ASSET) `
+            -MtAdminZip (Join-Path $env:RUNNER_TEMP $env:MT_ADMIN_ASSET) `
             -Stage (Join-Path $env:RUNNER_TEMP 'stage') `
             -Cache (Join-Path $env:RUNNER_TEMP 'downloads')
 
@@ -208,6 +218,7 @@ jobs:
       contents: write
     env:
       TA_VMS_COMMIT: ${{ needs.installer.outputs.ta_vms_commit }}
+      MT_ADMIN_COMMIT: ${{ needs.installer.outputs.mt_admin_commit }}
     steps:
       - uses: actions/checkout@v5
 
@@ -228,17 +239,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          export VERSION="${GITHUB_REF_NAME#v}" TAG="$GITHUB_REF_NAME" SHORT_COMMIT="${TA_VMS_COMMIT::7}"
-          envsubst '$TAG $TA_VMS_COMMIT $SHORT_COMMIT' > "$RUNNER_TEMP/notes.md" <<'EOF'
+          export VERSION="${GITHUB_REF_NAME#v}" TAG="$GITHUB_REF_NAME" SHORT_COMMIT="${TA_VMS_COMMIT::7}" SHORT_MT_ADMIN="${MT_ADMIN_COMMIT::7}"
+          envsubst '$TAG $TA_VMS_COMMIT $SHORT_COMMIT $MT_ADMIN_COMMIT $SHORT_MT_ADMIN' > "$RUNNER_TEMP/notes.md" <<'EOF'
           **TreeAlarm VMS is a video management system you run yourself.** It records, stores and plays back video from IP cameras over ONVIF and RTSP, streams live video to the browser over WebRTC, and runs on your own hardware with no cloud account. See the [ta_vms README](https://github.com/treealarm/ta_vms#readme).
 
           ### Downloads
           - **ta_vms-setup-x64.exe**: Windows installer, no Docker needed (Windows 10 1809 / Server 2019 or later, x64). Installs PostgreSQL, RabbitMQ, MediaMTX, Dapr and every service as native Windows services. It leaves out the analytics worker, ROI re-compression and hardware encoding; see [windows/README.md](https://github.com/treealarm/ta_install/blob/$TAG/windows/README.md). The installer is not code-signed yet, so SmartScreen asks before running it (More info, Run anyway).
           - **ta_vms-docker.zip**: the Docker Compose stack for Linux, with the analytics worker. Unzip, then `cd ta_vms && docker compose --env-file .env up -d`. It pulls the `treealarm/*:latest` images from Docker Hub, so it always runs the newest build; its README lists the defaults to replace before a real deployment.
 
-          The web interface opens on port 5134; the first sign-in is admin / admin, which then has to set a new password. Uninstalling, or `docker compose down`, keeps the data: `C:\ProgramData\TreeAlarm\VMS` on Windows, `./data` beside the compose file.
+          The web interface opens on port 5134; the first sign-in is admin / admin, which then has to set a new password. Users are added on port 8013. Uninstalling, or `docker compose down`, keeps the data: `C:\ProgramData\TreeAlarm\VMS` on Windows, `./data` beside the compose file.
 
-          The Windows installer is built from ta_vms [`$SHORT_COMMIT`](https://github.com/treealarm/ta_vms/commit/$TA_VMS_COMMIT).
+          The Windows installer is built from ta_vms [`$SHORT_COMMIT`](https://github.com/treealarm/ta_vms/commit/$TA_VMS_COMMIT) and multitenant_admin [`$SHORT_MT_ADMIN`](https://github.com/treealarm/multitenant_admin/commit/$MT_ADMIN_COMMIT).
           EOF
           cat "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" dist/ta_vms-setup-x64.exe dist/ta_vms-docker.zip \

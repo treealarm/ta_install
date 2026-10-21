@@ -18,6 +18,7 @@
     rabbitmq\   RabbitMQ server
     keycloak\   Keycloak, built for PostgreSQL, with the realm to import in data\import
     jre\        the Java runtime Keycloak runs on
+    mt_admin\   the user administration (multitenant_admin, standalone mode)
     redist\     installers of the .NET, ASP.NET Core and VC++ runtimes
     config\     ta_vms.env (= ../.env), windows.env, services.json
     setup\      the scripts the installer runs
@@ -29,6 +30,8 @@
 #>
 param(
   [Parameter(Mandatory)] [string] $TaVmsZip,
+  # multitenant_admin's Windows build (its windows-build release): the user administration.
+  [Parameter(Mandatory)] [string] $MtAdminZip,
   [Parameter(Mandatory)] [string] $Stage,
   [Parameter(Mandatory)] [string] $Cache
 )
@@ -83,6 +86,10 @@ Remove-Item (Join-Path $Stage 'dotnet\VmsSquareSingleton') -Recurse -Force -Erro
 foreach ($app in (Get-Content (Join-Path $windows 'config\services.json') -Raw | ConvertFrom-Json).apps) {
   if (-not (Test-Path (Join-Path $Stage $app.exe))) { throw "services.json names $($app.exe), which the ta_vms build does not contain" }
 }
+
+# User administration.
+Expand-Into $MtAdminZip (Join-Path $Stage 'mt_admin') 'mt_admin'
+if (-not (Test-Path (Join-Path $Stage 'mt_admin\mt_admin.Server.exe'))) { throw 'the mt_admin build carries no mt_admin.Server.exe' }
 
 # The supervisor.
 dotnet publish (Join-Path $windows 'TaVmsHost\TaVmsHost.csproj') -c Release -r win-x64 --self-contained false `

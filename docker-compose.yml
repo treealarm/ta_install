@@ -112,6 +112,21 @@ services:
       db-init:
         condition: service_completed_successfully
 
+  # User administration: multitenant_admin in its standalone mode (MT_ADMIN_REALM), which manages
+  # this installation's realm and lets in only its administrators.
+  mt_admin:
+    image: treealarm/mt_admin:latest
+    env_file:
+      - .env
+    environment:
+      MT_ADMIN_REALM: "${KEYCLOAK_REALM_NAME}"
+      HTTP_ADMIN_PORT: "8013"
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "${MT_ADMIN_PORT}:8013"
+    depends_on:
+      - keycloak
+
   mediamtx:
     image: bluenviron/mediamtx:latest
     # Passwords for the vms_publish / vms_read accounts declared in mediamtx.yml. MediaMTX merges
