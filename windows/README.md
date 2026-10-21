@@ -95,9 +95,10 @@ ta_vms build: `gh workflow run windows-installer.yml`.
 
 - **One localhost for every sidecar.** Each `daprd` has ports of its own (`config/services.json`),
   and each service learns its sidecar's from `DAPR_GRPC_PORT`/`DAPR_HTTP_PORT`.
-- **App ids resolve over mDNS**, as in Docker. If a machine's firewall or Hyper-V adapters get in
-  the way, set `TAVMS_DAPR_NAME_RESOLUTION=sqlite` in `site.env`: Dapr's resolver for sidecars that
-  all live on one host.
+- **App ids resolve through Dapr's `sqlite` resolver**, not mDNS as in Docker: every sidecar
+  registers at `127.0.0.1` (`DAPR_HOST_IP`) in a file in the data directory. mDNS announced them at
+  the machine's LAN address, so calls between services on one machine broke when that address
+  changed or the cable was out, and two installations on one LAN would have mixed their app ids.
 - **The Dapr components are generated** from the environment on every start, so the passwords exist
   in one place only and there is nothing for `db-init` to cross-check.
 - **MediaMTX** uses the same `mediamtx.yml`; its Control API and WHEP listener are on the loopback

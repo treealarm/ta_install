@@ -85,9 +85,9 @@ internal static class DaprComponents
       """;
   }
 
-  // mDNS is what Docker uses and the default. sqlite is Dapr's resolver for exactly this case —
-  // every sidecar on one host — and the fallback if mDNS turns out unreliable on a Windows machine
-  // (multicast and the firewall, Hyper-V adapters). Required, so the choice is always visible.
+  // sqlite, Dapr's resolver for every sidecar on one host, is what windows.env sets: it keeps
+  // calls between services on the loopback. mDNS, what Docker uses, announces the LAN address and
+  // stays selectable for a deployment that spans machines. Required, so the choice is always visible.
   internal static string Configuration(StackConfig c)
   {
     var resolver = c.Require("TAVMS_DAPR_NAME_RESOLUTION");
