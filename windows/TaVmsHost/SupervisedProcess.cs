@@ -169,6 +169,10 @@ internal sealed class SupervisedProcess : IAsyncDisposable
       // keeps a Ctrl+C on the host's console (when it is run by hand) from reaching the children
       // before the host has decided the order they stop in.
       CreateNoWindow = true,
+      // An empty stdin. A batch file (Keycloak's kc.bat) asks "Terminate batch job (Y/N)?" on its
+      // console after Ctrl+C has already stopped its java, and waits there until the stop times out;
+      // reading the end of a closed pipe instead, it finishes at once. Nothing here reads stdin.
+      RedirectStandardInput = true,
       RedirectStandardOutput = true,
       RedirectStandardError = true,
       StandardOutputEncoding = Encoding.UTF8,
@@ -179,6 +183,7 @@ internal sealed class SupervisedProcess : IAsyncDisposable
 
     var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
     if (!process.Start()) throw new InvalidOperationException($"{Name}: Process.Start returned false");
+    process.StandardInput.Close();
     PumpLines(process.StandardOutput, "stdout");
     PumpLines(process.StandardError, "stderr");
 
