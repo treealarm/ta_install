@@ -154,6 +154,10 @@ jobs:
             } elseif ($r.StatusCode -notin 404, 405) { throw "change-password answered $($r.StatusCode): $($r.Content)" }
           }
 
+          $mtAdmin = Invoke-RestMethod "http://localhost:$(& $hostExe env MT_ADMIN_PORT)/api/config"
+          if (-not $mtAdmin.standalone) { throw "mt_admin is not in standalone mode: $($mtAdmin | ConvertTo-Json -Compress)" }
+          "ok   mt_admin, realm $($mtAdmin.realm)"
+
           $anonymous = Invoke-WebRequest "$base/api/recording-profiles" -SkipHttpErrorCheck
           if ($anonymous.StatusCode -ne 401) { throw "without a token /api/recording-profiles answered $($anonymous.StatusCode), not 401" }
           "ok   anonymous call refused"
