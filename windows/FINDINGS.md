@@ -3,6 +3,31 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-21: v0.1.4, upgraded from v0.1.3
+
+The fixes found below, on the same machine. Upgrade `/VERYSILENT`: **152 s** (0.1.3: 376 s).
+setup.exe is 279 MB (was 523), the installation 5 760 files (was about 29 000).
+
+| Phase | 0.1.3 | 0.1.4 |
+|---|---|---|
+| loader, extracting `Stop-TaVms.ps1` | 46 s | 5 s |
+| stopping the services | 13 s | 12 s |
+| deleting the old directories | 12 s | 9 s |
+| unpacking | 146 s | 64 s |
+| VC++ redistributable | 90 s | 0 s (already installed, skipped) |
+| PostgreSQL, RabbitMQ | about 40 s | 28 s, RabbitMQ 26 of them |
+| firewall, service, web interface up | about 30 s | 29 s |
+
+Since the upgrade:
+- **A new camera has live video at once.** It was added, and its first WHEP offer was answered in
+  1.3 s with the first frame at 4.3 s. vms re-pointed the push 2 s after the camera was configured.
+  One failed attempt before that is still logged: it uses the environment's default target, which
+  the Windows install leaves empty.
+- web-vms's sidecar no longer logs `error getting topics from app`.
+
+What is left of the six minutes is RabbitMQ's own boot and the 24 processes starting one after
+another; neither depends on the installer.
+
 ## 2026-10-21: v0.1.3, upgraded from v0.1.2
 
 **Machine.** Windows 10 Pro 22H2 (19045), Russian locale; Intel Core i5-750 (4 cores, 2009, no
