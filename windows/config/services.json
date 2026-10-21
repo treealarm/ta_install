@@ -56,6 +56,9 @@
         "KC_HTTP_HOST": "127.0.0.1",
         "KC_HTTP_PORT": "${KEYCLOAK_PORT}",
         "KC_HOSTNAME_STRICT": "false",
+        // One server: a local cache. The default clusters through JGroups and listens for other
+        // nodes on the LAN address (7800, 57800).
+        "KC_CACHE": "local",
         "KC_BOOTSTRAP_ADMIN_USERNAME": "${KEYCLOAK_ADMIN_USER}",
         "KC_BOOTSTRAP_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD}",
         // Read by realm.json's placeholders.

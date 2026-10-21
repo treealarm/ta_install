@@ -97,6 +97,8 @@ services:
       # administration console is opened as 127.0.0.1.
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
+      # One server: a local cache rather than the default JGroups cluster.
+      KC_CACHE: local
       KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN_USER}"
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD}"
       # Read by realm.json's placeholders.
