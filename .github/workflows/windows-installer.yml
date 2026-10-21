@@ -135,12 +135,13 @@ jobs:
             $r = Invoke-WebRequest "$base/api/auth/change-password" -Method Post -ContentType 'application/json' `
               -Headers @{ Authorization = "Bearer $token" } -SkipHttpErrorCheck `
               -Body '{"currentPassword":"admin","newPassword":"smoke-test-password"}'
-            # A ta_vms build from before the change-password endpoint: the role means nothing to it.
+            # A ta_vms build from before the change-password endpoint answers 405 (the SPA fallback
+            # takes GET only) or 404, and the role means nothing to it.
             if ($r.StatusCode -eq 200) {
               $token = ($r.Content | ConvertFrom-Json).access_token
               if ((Get-Roles $token) -contains 'password-change-required') { throw 'the new token still demands a password change' }
               "ok   password changed"
-            } elseif ($r.StatusCode -ne 404) { throw "change-password answered $($r.StatusCode): $($r.Content)" }
+            } elseif ($r.StatusCode -notin 404, 405) { throw "change-password answered $($r.StatusCode): $($r.Content)" }
           }
 
           $anonymous = Invoke-WebRequest "$base/api/recording-profiles" -SkipHttpErrorCheck
