@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TreeAlarm VMS for Windows, the MSI. A thin wrapper, as the Inno Setup script before it was: it
+  copies the directory scripts/Build-Stage.ps1 laid out and runs the PowerShell scripts in it,
+  which do the actual work and can be run by hand as well. The runtimes those need (VC++, .NET,
+  ASP.NET Core) are installed by the bundle in ../Bundle, which is what users download.
+
+  Unattended, without the bundle (the runtimes already installed):
+    msiexec /i ta_vms-x64.msi /qn [INSTALLFOLDER=<dir>] [STORAGEPATH=<dir>] /l*v <log>
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="TreeAlarm VMS"
+    Manufacturer="TreeAlarm"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="B123BB74-D5F9-40DC-9EC2-AF3F5467A6C6"
+    Language="1033"
+    Scope="perMachine">
+
+    <!-- Never change UpgradeCode: it is how an upgrade finds the installation it replaces.
+
+         afterInstallInitialize: the old version is removed inside this transaction, before the new
+         files are copied, so a failed upgrade rolls back to the old version. Its removal stops the
+         services first (StopServices below, in the old version's own sequence) and leaves them
+         registered: the paths do not change, and InstallServices then starts them again.
+         Same-version upgrades are allowed so that two CI builds of one version replace each
+         other instead of being installed side by side. -->
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="A newer version of TreeAlarm VMS is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="ta_vms.ico" SourceFile="!(bindpath.Installer)\ta_vms.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ta_vms.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://treealarm.dev" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/treealarm/ta_install/blob/main/windows/README.md" />
+    <!-- Restart Manager would offer to close, and then restart, the processes holding files: ours,
+         which the custom actions below stop in the order they depend on each other. -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+
+    <!-- The data directory: database, recordings, logs, site.env. Never removed by an uninstall. -->
+    <SetProperty Id="DATADIR" Value="[CommonAppDataFolder]TreeAlarm\VMS" Before="CostFinalize" Sequence="both" />
+    <!-- First install only: where recordings and exports go. Install-TaVms.ps1 ignores it once
+         site.env exists, so an upgrade keeps the path it was given the first time. -->
+    <SetProperty Id="STORAGEPATH" Value="[DATADIR]" After="SetDATADIR" Sequence="both" Condition="NOT STORAGEPATH" />
+
+    <!-- The Inno Setup installation of 0.1.5 and before, which this replaces (see
+         RemoveInnoInstallation). Inno wrote its uninstall key into the 64-bit view. -->
+    <Property Id="INNOINSTALLLOCATION">
+      <RegistrySearch
+        Root="HKLM"
+        Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{6C2E9B0E-4B7A-4F51-9E0B-7A1C3D5F2E84}_is1"
+        Name="InstallLocation"
+        Type="raw"
+        Bitness="always64" />
+    </Property>
+    <!-- Inno is removed in the execute sequence, after MSI has already decided which files to copy
+         by comparing them with Inno's copies, and an equal-version DLL is not copied over itself.
+         "a" copies every file regardless, so none is missing once Inno has deleted its own. -->
+    <SetProperty Id="REINSTALLMODE" Value="amus" Before="CostInitialize" Sequence="execute" Condition="INNOINSTALLLOCATION" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="TreeAlarm VMS" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="System64Folder" />
+
+    <Feature Id="Main" Title="TreeAlarm VMS" Level="1">
+      <!-- The whole stage but the runtime installers, which the bundle runs. -->
+      <Files Include="!(bindpath.Stage)\**" Directory="INSTALLFOLDER">
+        <Exclude Files="!(bindpath.Stage)\redist\**" />
+      </Files>
+      <Component Id="Icon" Directory="INSTALLFOLDER">
+        <File Id="ta_vms.ico" Source="!(bindpath.Installer)\ta_vms.ico" KeyPath="yes" />
+      </Component>
+      <ComponentRef Id="Shortcuts" />
+    </Feature>
+
+    <!-- 64-bit PowerShell, always: a 32-bit one would write the RabbitMQ cookie into SysWOW64's
+         profile, where the service never looks. A directory passed to a script ends in "\.": a
+         bare trailing backslash would escape the closing quote. The scripts normalise it away. -->
+    <!-- Hands the old installation's own uninstaller the job: it stops the services, removes them
+         and the firewall rules, deletes its files and keeps the data. Install-TaVms.ps1 then finds
+         site.env and proceeds as an upgrade. unins000.exe hands over to a copy of itself in %TEMP%
+         (_iu*.tmp) and exits, so that copy is waited for too. -->
+    <CustomAction
+      Id="RemoveInnoInstallation"
+      Directory="System64Folder"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -Command &quot;&amp; '[INNOINSTALLLOCATION]unins000.exe' /VERYSILENT /SUPPRESSMSGBOXES /NORESTART | Out-Null; Start-Sleep -Seconds 2; Get-Process -Name _iu* -ErrorAction SilentlyContinue | Wait-Process&quot;" />
+    <CustomAction
+      Id="InstallServices"
+      Directory="System64Folder"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Install-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot; -StoragePath &quot;[STORAGEPATH].&quot;" />
+    <!-- A first install whose set-up failed takes its services with it; an upgrade's are the old
+         version's, which the rollback restores. -->
+    <CustomAction
+      Id="RollbackServices"
+      Directory="System64Folder"
+      Execute="rollback"
+      Impersonate="no"
+      Return="ignore"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Uninstall-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot;" />
+    <!-- Removed by an upgrade: stopped, so that the files can go, and left registered. -->
+    <CustomAction
+      Id="StopServices"
+      Directory="System64Folder"
+      Execute="deferred"
+      Impersonate="no"
+      Return="check"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Stop-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot;" />
+    <!-- Uninstalled: the services and firewall rules go, the data directory stays. -->
+    <CustomAction
+      Id="RemoveServices"
+      Directory="System64Folder"
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Uninstall-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot;" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RemoveInnoInstallation" After="InstallInitialize" Condition="INNOINSTALLLOCATION AND NOT REMOVE" />
+      <Custom Action="StopServices" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND UPGRADINGPRODUCTCODE" />
+      <Custom Action="RemoveServices" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RollbackServices" Before="InstallServices" Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED AND NOT INNOINSTALLLOCATION" />
+      <Custom Action="InstallServices" After="InstallFiles" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Package>
+
+  <Fragment>
+    <!-- Both open the web interface: TreeAlarm VMS.url is written by Install-TaVms.ps1, which knows
+         the port. The registry value is the component's key path, and what the bundle reads back
+         to upgrade the installation where it is. -->
+    <Component Id="Shortcuts" Directory="INSTALLFOLDER">
+      <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="TreeAlarm VMS"
+                Target="[INSTALLFOLDER]TreeAlarm VMS.url" Icon="ta_vms.ico" />
+      <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="TreeAlarm VMS"
+                Target="[INSTALLFOLDER]TreeAlarm VMS.url" Icon="ta_vms.ico" />
+      <RemoveFile Id="WebShortcutFile" Name="TreeAlarm VMS.url" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\TreeAlarm\VMS" Name="InstallFolder" Type="string"
+                     Value="[INSTALLFOLDER]" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

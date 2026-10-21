@@ -4,18 +4,18 @@
   by hand; safe to run again.
 
 .DESCRIPTION
-  The files are already in place (the installer copied them to -InstallDir). This sets up what
-  Docker would otherwise provide:
+  The files are already in place (the installer copied them to -InstallDir), and so are the VC++,
+  .NET and ASP.NET Core runtimes (setup.exe installs them before the MSI, from redist\). This sets
+  up what Docker would otherwise provide:
 
-    1. the VC++, .NET and ASP.NET Core runtimes, if missing
-    2. <DataDir>\config\site.env: generated passwords, free ports, storage paths; an upgrade adds
+    1. <DataDir>\config\site.env: generated passwords, free ports, storage paths; an upgrade adds
        only the settings a newer version introduced
-    3. data directories and their ACLs (the services run as LocalService; passwords readable only
+    2. data directories and their ACLs (the services run as LocalService; passwords readable only
        by administrators and the services)
-    4. PostgreSQL: initdb on first install, service TaVms.Postgres (NetworkService)
-    5. RabbitMQ: service TaVms.RabbitMQ, its user, loopback-only listeners
-    6. firewall rules for what the LAN must reach: the web UI, RTSP, WebRTC media, ONVIF discovery
-    7. service TaVmsHost ("TreeAlarm VMS"), which runs everything else
+    3. PostgreSQL: initdb on first install, service TaVms.Postgres (NetworkService)
+    4. RabbitMQ: service TaVms.RabbitMQ, its user, loopback-only listeners
+    5. firewall rules for what the LAN must reach: the web UI, RTSP, WebRTC media, ONVIF discovery
+    6. service TaVmsHost ("TreeAlarm VMS"), which runs everything else
 
   A log of each run goes to <DataDir>\install-logs. Written for Windows PowerShell 5.1, which is
   what a fresh Windows has.
@@ -29,6 +29,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# The MSI passes directories as "<dir>\.", a bare trailing backslash would escape the closing quote.
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$DataDir = [IO.Path]::GetFullPath($DataDir)
+if ($StoragePath) { $StoragePath = [IO.Path]::GetFullPath($StoragePath) }
 
 # Well-known SIDs rather than names, which are translated on non-English Windows.
 $SidAdmins = '*S-1-5-32-544'
@@ -47,13 +52,6 @@ function Write-Step([string] $what) { Write-Host ('== {0:HH:mm:ss} {1}' -f (Get-
 function Invoke-Checked([string] $exe, [string[]] $arguments, [int[]] $ok = @(0)) {
   & $exe @arguments
   if ($ok -notcontains $LASTEXITCODE) { throw "$exe $($arguments -join ' ') exited with $LASTEXITCODE" }
-}
-
-# The runtime installers are GUI programs: PowerShell's & neither waits for them nor sets
-# $LASTEXITCODE, so they are started and waited for explicitly.
-function Invoke-Installer([string] $exe, [int[]] $ok = @(0, 3010)) {
-  $process = Start-Process -FilePath $exe -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
-  if ($ok -notcontains $process.ExitCode) { throw "$exe exited with $($process.ExitCode)" }
 }
 
 function Grant-Access([string] $path, [string[]] $grants, [switch] $Private) {
@@ -103,37 +101,6 @@ function Wait-Until([string] $what, [int] $seconds, [scriptblock] $test) {
     Start-Sleep -Seconds 2
   }
   throw "$what did not come up within $seconds s"
-}
-
-function Install-Runtimes {
-  $redist = Join-Path $InstallDir 'redist'
-
-  # Skipped when this or a newer version is already there. Run anyway, it does exit with 1638 then,
-  # but only after trying to create a System Restore point: 90 s on the test machine, the largest
-  # single step of an upgrade.
-  Write-Step 'VC++ redistributable'
-  $vcRedist = Join-Path $redist 'vc_redist.x64.exe'
-  $bundled = [version] (Get-Item $vcRedist).VersionInfo.FileVersion
-  $vcRuntime = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64' -ErrorAction SilentlyContinue
-  if ($vcRuntime -and $vcRuntime.Installed -eq 1 -and
-      [version]::new($vcRuntime.Major, $vcRuntime.Minor, $vcRuntime.Bld, $vcRuntime.Rbld) -ge $bundled) {
-    Write-Host "   $($vcRuntime.Version) already installed"
-  } else {
-    Invoke-Installer $vcRedist @(0, 1638, 3010)
-  }
-
-  # Two installers: the ASP.NET Core one does not carry the .NET runtime it runs on.
-  foreach ($runtime in @(@('Microsoft.NETCore.App', 'dotnet-runtime-*.exe'), @('Microsoft.AspNetCore.App', 'aspnetcore-runtime-*.exe'))) {
-    Write-Step "$($runtime[0]) 10"
-    $shared = Join-Path $env:ProgramFiles "dotnet\shared\$($runtime[0])"
-    if (Get-ChildItem $shared -Directory -Filter '10.*' -ErrorAction SilentlyContinue) {
-      Write-Host '   already installed'
-      continue
-    }
-    $installer = Get-ChildItem $redist -Filter $runtime[1] | Select-Object -First 1
-    if (-not $installer) { throw "no $($runtime[1]) in $redist" }
-    Invoke-Installer $installer.FullName
-  }
 }
 
 function New-SiteEnv([string] $path) {
@@ -334,7 +301,7 @@ function Install-HostService {
   Start-Service $HostService
 }
 
-# The Start menu and desktop shortcuts (ta_vms.iss) point at this file rather than at a URL of their
+# The Start menu and desktop shortcuts (installer\Package) point at this file rather than at a URL of their
 # own, so the port is read here, from the same env files the service reads, and a port changed in
 # site.env reaches the shortcuts with the next install.
 function New-WebShortcut {
@@ -361,7 +328,6 @@ New-Item -ItemType Directory -Force $logDir | Out-Null
 Start-Transcript -Path (Join-Path $logDir ('install-{0:yyyyMMdd-HHmmss}.log' -f (Get-Date))) | Out-Null
 try {
   Write-Host "Installing TreeAlarm VMS: $InstallDir, data in $DataDir"
-  Install-Runtimes
   New-Item -ItemType Directory -Force (Join-Path $DataDir 'config') | Out-Null
   New-SiteEnv (Join-Path $DataDir 'config\site.env')
   Initialize-DataDirectories

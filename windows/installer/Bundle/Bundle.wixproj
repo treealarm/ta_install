@@ -1,0 +1,26 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <!--
+    ta_vms-setup-x64.exe: the runtime installers and ../Package (ta_vms-x64.msi), which this builds
+    first. Both from the directory scripts/Build-Stage.ps1 laid out:
+
+      dotnet build Bundle.wixproj -c Release -p:StageDir=<stage> -p:Version=<x.y.z>
+  -->
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <OutputName>ta_vms-setup-x64</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
+    <DefineConstants>ProductVersion=$(Version);StageDir=$(StageDir)</DefineConstants>
+  </PropertyGroup>
+
+  <Target Name="RequireStage" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(StageDir)' == '' or !Exists('$(StageDir)\redist\redist.wxi')"
+           Text="Pass -p:StageDir=&lt;the directory scripts/Build-Stage.ps1 laid out&gt;." />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Package\Package.wixproj" />
+    <PackageReference Include="WixToolset.Bal.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

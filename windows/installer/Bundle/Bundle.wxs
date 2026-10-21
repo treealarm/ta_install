@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ta_vms-setup-x64.exe, what users download: the runtimes the services need, then ta_vms-x64.msi.
+  The runtime installers are MSI-based themselves, and Windows runs one installation at a time, so
+  they cannot be run from inside ta_vms-x64.msi; a bundle chains them in front of it instead.
+
+  Unattended:
+    ta_vms-setup-x64.exe /quiet /norestart [/log <file>] [InstallFolder=<dir>] [StorageFolder=<dir>]
+    ta_vms-setup-x64.exe /uninstall /quiet /norestart
+  The variable names are case-sensitive. An upgrade keeps both folders as they are.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- Written by scripts/Build-Stage.ps1: the file names and versions of the runtime installers it
+       downloaded, for the detect conditions below. -->
+  <?include $(var.StageDir)\redist\redist.wxi?>
+
+  <!-- Never change UpgradeCode: it is how a newer bundle finds the one it replaces. -->
+  <Bundle
+    Name="TreeAlarm VMS"
+    Manufacturer="TreeAlarm"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="C7DF5FE1-A0B6-4E34-B0F4-88A98C32F440"
+    IconSourceFile="..\ta_vms.ico"
+    AboutUrl="https://treealarm.dev"
+    HelpUrl="https://github.com/treealarm/ta_install/blob/main/windows/README.md">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        Theme="hyperlinkLicense"
+        ThemeFile="Theme.xml"
+        LocalizationFile="Theme.wxl"
+        LogoFile="logo.png"
+        LicenseUrl="https://github.com/treealarm/ta_install/blob/main/LICENSE"
+        ShowVersion="yes"
+        LaunchTarget="[InstallFolder]\TreeAlarm VMS.url" />
+    </BootstrapperApplication>
+
+    <!-- Windows 10 1809 / Server 2019: the oldest the bundled runtimes support. -->
+    <bal:Condition
+      Message="TreeAlarm VMS needs 64-bit Windows 10 version 1809 or Windows Server 2019, or later."
+      Condition="VersionNT64 AND WindowsBuildNumber &gt;= 17763" />
+
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]TreeAlarm VMS" bal:Overridable="yes" />
+    <Variable Name="StorageFolder" Type="formatted" Value="[CommonAppDataFolder]TreeAlarm\VMS" bal:Overridable="yes" />
+
+    <!-- An upgrade stays where the installation is: where the MSI recorded it, or, coming from the
+         Inno Setup installer of 0.1.5 and before, where that one put it. A search that finds
+         nothing would clear the variable, so each value is read only once it is known to be there. -->
+    <util:RegistrySearch Id="FindOwnInstallFolder" Root="HKLM" Key="SOFTWARE\TreeAlarm\VMS" Value="InstallFolder"
+                         Result="exists" Variable="HasOwnInstallFolder" Bitness="always64" />
+    <util:RegistrySearch Id="ReadOwnInstallFolder" After="FindOwnInstallFolder" Condition="HasOwnInstallFolder"
+                         Root="HKLM" Key="SOFTWARE\TreeAlarm\VMS" Value="InstallFolder"
+                         Variable="InstallFolder" Bitness="always64" />
+    <util:RegistrySearch Id="FindInnoInstallation" Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{6C2E9B0E-4B7A-4F51-9E0B-7A1C3D5F2E84}_is1"
+                         Value="InstallLocation" Result="exists" Variable="HasInnoInstallation" Bitness="always64" />
+    <util:RegistrySearch Id="ReadInnoInstallFolder" After="FindInnoInstallation"
+                         Condition="HasInnoInstallation AND NOT HasOwnInstallFolder" Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{6C2E9B0E-4B7A-4F51-9E0B-7A1C3D5F2E84}_is1"
+                         Value="InstallLocation" Variable="InstallFolder" Bitness="always64" />
+    <!-- The data of an earlier installation, uninstalled or not: its site.env names the archive's
+         place, so the theme does not ask again. -->
+    <util:FileSearch Path="[CommonAppDataFolder]TreeAlarm\VMS\config\site.env" Result="exists" Variable="SiteEnvExists" />
+
+    <util:RegistrySearch Root="HKLM" Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" Value="Bld"
+                         Variable="VCRedistBld" Bitness="always64" />
+    <util:DirectorySearch Path="[ProgramFiles64Folder]dotnet\shared\Microsoft.NETCore.App\$(var.DotnetVersion)"
+                          Result="exists" Variable="DotnetRuntimePresent" />
+    <util:DirectorySearch Path="[ProgramFiles64Folder]dotnet\shared\Microsoft.AspNetCore.App\$(var.AspNetCoreVersion)"
+                          Result="exists" Variable="AspNetCoreRuntimePresent" />
+
+    <!-- Cache="remove": nothing here needs its source again. The runtimes stay installed for good
+         (other software may use them), and MSI keeps what it needs to uninstall ta_vms-x64.msi
+         itself; caching the 500 MB package would only double what the installation takes. -->
+    <Chain>
+      <!-- Detected rather than run every time: it does exit at once with 1638 when this or a newer
+           build is there, but only after trying to create a System Restore point, which took 90 s
+           on the test machine. 3010: installed, a restart pending; the services do not need one. -->
+      <ExePackage Id="VcRedist" SourceFile="$(var.StageDir)\redist\vc_redist.x64.exe"
+                  DisplayName="Microsoft Visual C++ Redistributable (x64)"
+                  PerMachine="yes" Permanent="yes" Cache="remove" Vital="yes"
+                  DetectCondition="VCRedistBld &gt;= $(var.VcRedistBld)"
+                  InstallArguments="/install /quiet /norestart">
+        <ExitCode Value="1638" Behavior="success" />
+        <ExitCode Value="3010" Behavior="success" />
+      </ExePackage>
+      <!-- Two installers: the ASP.NET Core one does not carry the .NET runtime it runs on. -->
+      <ExePackage Id="DotnetRuntime" SourceFile="$(var.StageDir)\redist\$(var.DotnetInstaller)"
+                  DisplayName="Microsoft .NET Runtime $(var.DotnetVersion)"
+                  PerMachine="yes" Permanent="yes" Cache="remove" Vital="yes"
+                  DetectCondition="DotnetRuntimePresent"
+                  InstallArguments="/install /quiet /norestart">
+        <ExitCode Value="3010" Behavior="success" />
+      </ExePackage>
+      <ExePackage Id="AspNetCoreRuntime" SourceFile="$(var.StageDir)\redist\$(var.AspNetCoreInstaller)"
+                  DisplayName="Microsoft ASP.NET Core Runtime $(var.AspNetCoreVersion)"
+                  PerMachine="yes" Permanent="yes" Cache="remove" Vital="yes"
+                  DetectCondition="AspNetCoreRuntimePresent"
+                  InstallArguments="/install /quiet /norestart">
+        <ExitCode Value="3010" Behavior="success" />
+      </ExePackage>
+      <MsiPackage Id="TaVms" SourceFile="$(var.Package.TargetPath)" Cache="remove">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="STORAGEPATH" Value="[StorageFolder]" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

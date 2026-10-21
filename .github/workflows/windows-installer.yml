@@ -1,5 +1,6 @@
-# Builds the Windows installer (windows/installer/ta_vms.iss) and proves it on a clean runner:
-# a silent install, the stack answering through its sidecars, an uninstall.
+# Builds the Windows installer (windows/installer: the WiX bundle ta_vms-setup-x64.exe and the MSI
+# inside it, ta_vms-x64.msi) and proves it on clean runners: a silent install, the stack answering
+# through its sidecars, an uninstall; and, beside it, an upgrade over the latest release.
 #
 # Its input is the ta_vms Windows build, the asset ta_vms-windows-x64.zip of the windows-build
 # prerelease in treealarm/ta_vms, which every push to ta_vms master replaces -- the way the compose
@@ -84,36 +85,47 @@ jobs:
             -Stage (Join-Path $env:RUNNER_TEMP 'stage') `
             -Cache (Join-Path $env:RUNNER_TEMP 'downloads')
 
+      # A CI build is numbered after the latest release, so that it upgrades that one: MSI compares
+      # three fields only and refuses a downgrade.
       - name: Build setup.exe
         run: |
-          $version = "0.0.0.$env:GITHUB_RUN_NUMBER"
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $version = $env:GITHUB_REF_NAME -replace '^v', ''
             if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "tag '$env:GITHUB_REF_NAME' is not vX.Y.Z" }
+          } else {
+            $latest = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
+            if ($LASTEXITCODE -ne 0 -or $latest -notmatch '^v(\d+)\.(\d+)\.(\d+)$') { throw "no vX.Y.Z release to number this build after ($latest)" }
+            $version = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
           }
-          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --yes --no-progress
-            if ($LASTEXITCODE -ne 0) { throw 'cannot install Inno Setup' }
+          "version $version"
+          dotnet build windows\installer\Bundle\Bundle.wixproj -c Release --nologo `
+            "-p:StageDir=$env:RUNNER_TEMP\stage" "-p:Version=$version"
+          if ($LASTEXITCODE -ne 0) { throw 'the WiX build failed' }
+          $out = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\out"
+          foreach ($name in 'ta_vms-setup-x64.exe', 'ta_vms-x64.msi') {
+            $built = Get-ChildItem windows\installer -Recurse -Filter $name | Where-Object FullName -match '\\bin\\' | Select-Object -First 1
+            if (-not $built) { throw "the WiX build produced no $name" }
+            Copy-Item $built.FullName $out
           }
-          & $iscc /Q "/DStageDir=$env:RUNNER_TEMP\stage" "/DAppVersion=$version" `
-            "/DOutputDir=$env:RUNNER_TEMP\out" windows\installer\ta_vms.iss
-          if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
-          Get-Item "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" | Format-List Name, Length
+          Get-ChildItem $out | Format-Table Name, Length
 
       # Waits for setup.exe itself, not with -Wait: in PowerShell 7 that waits for every descendant,
-      # and installing RabbitMQ leaves epmd.exe running for good. (The uninstall below is the
-      # opposite case: unins000.exe hands over to a copy of itself and exits, so there -Wait is
-      # what waits for the uninstall to finish.)
+      # and installing RabbitMQ leaves epmd.exe running for good.
       - name: Install
         timeout-minutes: 20
         run: |
           $setup = Start-Process "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" -PassThru `
-            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup.log"
+            -ArgumentList '/quiet', '/norestart', '/log', "$env:RUNNER_TEMP\setup.log"
           $null = $setup.Handle # keeps the exit code readable after the process is gone
           $setup.WaitForExit()
           if ($setup.ExitCode -ne 0) { throw "setup exited with $($setup.ExitCode)" }
           Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ | Format-Table Name, Status, StartType
+          # One entry in Apps and Features, the bundle's: the MSI and the runtimes it chained are
+          # its packages, not products of their own to the user.
+          $entries = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.DisplayName -eq 'TreeAlarm VMS' -and -not $_.SystemComponent })
+          if ($entries.Count -ne 1) { throw "$($entries.Count) visible 'TreeAlarm VMS' entries in Apps and Features, not 1" }
+          "ok   Apps and Features: TreeAlarm VMS $($entries[0].DisplayVersion)"
 
       # Each of these goes browser -> web_srv -> its sidecar -> another app's sidecar -> the app
       # (-> PostgreSQL), so a 200 means name resolution, the components and the databases all work.
@@ -181,18 +193,25 @@ jobs:
       - name: Uninstall
         timeout-minutes: 10
         run: |
-          $u = Start-Process 'C:\Program Files\TreeAlarm VMS\unins000.exe' -Wait -PassThru `
-            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          $u = Start-Process "$env:RUNNER_TEMP\out\ta_vms-setup-x64.exe" -PassThru `
+            -ArgumentList '/uninstall', '/quiet', '/norestart', '/log', "$env:RUNNER_TEMP\uninstall.log"
+          $null = $u.Handle
+          $u.WaitForExit()
           if ($u.ExitCode -ne 0) { throw "uninstall exited with $($u.ExitCode)" }
           $left = Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ -ErrorAction SilentlyContinue
           if ($left) { throw "services left behind: $($left.Name -join ', ')" }
+          if (Test-Path 'C:\Program Files\TreeAlarm VMS') {
+            Get-ChildItem 'C:\Program Files\TreeAlarm VMS' -Recurse -Force | Select-Object -First 20 FullName
+            throw 'the installation directory is still there'
+          }
           if (-not (Test-Path 'C:\ProgramData\TreeAlarm\VMS\config\site.env')) { throw 'uninstall removed the data directory' }
 
       - name: Collect logs
         if: ${{ always() }}
         run: |
           $out = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'logs')
-          Copy-Item "$env:RUNNER_TEMP\setup.log" $out -ErrorAction SilentlyContinue
+          # setup.log, and beside it the log of each package the bundle ran (setup_000_*.log ...).
+          Copy-Item "$env:RUNNER_TEMP\*.log" $out -ErrorAction SilentlyContinue
           foreach ($d in 'install-logs', 'host-logs', 'logs') {
             $src = "C:\ProgramData\TreeAlarm\VMS\$d"
             if (Test-Path $src) { Copy-Item $src (Join-Path $out $d) -Recurse }
@@ -209,13 +228,107 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ta_vms-setup-x64
-          path: ${{ runner.temp }}/out/ta_vms-setup-x64.exe
+          path: |
+            ${{ runner.temp }}/out/ta_vms-setup-x64.exe
+            ${{ runner.temp }}/out/ta_vms-x64.msi
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
 
-  release:
+  # What a user does: the latest release installed, then this build run over it. The data has to
+  # survive (site.env, the database, Keycloak's realm), and the result must look like a fresh
+  # install of this version. The release before 0.1.6 was an Inno Setup installer, which this build
+  # removes on its own.
+  upgrade:
     needs: installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ta_vms-setup-x64
+          path: ${{ runner.temp }}/new
+
+      - name: Install the latest release
+        timeout-minutes: 20
+        run: |
+          $tag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
+          if ($LASTEXITCODE -ne 0) { throw 'no release to upgrade from' }
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern ta_vms-setup-x64.exe --dir "$env:RUNNER_TEMP\old"
+          if ($LASTEXITCODE -ne 0) { throw "cannot download the installer of $tag" }
+          $old = "$env:RUNNER_TEMP\old\ta_vms-setup-x64.exe"
+          # Inno Setup signs its work in the version resource; a WiX bundle does not.
+          $inno = (Get-Item $old).VersionInfo.Comments -match 'Inno Setup'
+          "installing $tag ($(if ($inno) { 'Inno Setup' } else { 'WiX' }))"
+          $arguments = if ($inno) { '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\old-setup.log" }
+                       else { '/quiet', '/norestart', '/log', "$env:RUNNER_TEMP\old-setup.log" }
+          $setup = Start-Process $old -PassThru -ArgumentList $arguments
+          $null = $setup.Handle
+          $setup.WaitForExit()
+          if ($setup.ExitCode -ne 0) { throw "$tag setup exited with $($setup.ExitCode)" }
+          (Get-FileHash 'C:\ProgramData\TreeAlarm\VMS\config\site.env').Hash | Set-Content "$env:RUNNER_TEMP\site.env.hash"
+
+      - name: Upgrade
+        timeout-minutes: 20
+        run: |
+          $setup = Start-Process "$env:RUNNER_TEMP\new\ta_vms-setup-x64.exe" -PassThru `
+            -ArgumentList '/quiet', '/norestart', '/log', "$env:RUNNER_TEMP\setup.log"
+          $null = $setup.Handle
+          $setup.WaitForExit()
+          if ($setup.ExitCode -ne 0) { throw "the upgrade exited with $($setup.ExitCode)" }
+
+          $services = Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ
+          $services | Format-Table Name, Status
+          if ($services | Where-Object Status -ne 'Running') { throw 'a service is not running after the upgrade' }
+          if ((Get-FileHash 'C:\ProgramData\TreeAlarm\VMS\config\site.env').Hash -ne (Get-Content "$env:RUNNER_TEMP\site.env.hash")) {
+            throw 'the upgrade rewrote site.env'
+          }
+          $uninstall = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+          if (Test-Path "$uninstall\{6C2E9B0E-4B7A-4F51-9E0B-7A1C3D5F2E84}_is1") { throw 'the Inno Setup installation is still registered' }
+          if (Test-Path 'C:\Program Files\TreeAlarm VMS\unins000.exe') { throw "Inno Setup's uninstaller was left behind" }
+          $entries = @(Get-ItemProperty "$uninstall\*", 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.DisplayName -eq 'TreeAlarm VMS' -and -not $_.SystemComponent })
+          if ($entries.Count -ne 1) { throw "$($entries.Count) visible 'TreeAlarm VMS' entries in Apps and Features, not 1" }
+          "ok   upgraded to $($entries[0].DisplayVersion), site.env kept"
+
+          # Keycloak's database survived: the realm is there, and admin still has its first password.
+          $hostExe = 'C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe'
+          $base = "http://localhost:$(& $hostExe env WEB_VMS_PORT)"
+          $deadline = (Get-Date).AddMinutes(5)
+          $token = $null
+          while (-not $token -and (Get-Date) -lt $deadline) {
+            try {
+              $token = (Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
+                -Body '{"username":"admin","password":"admin"}' -TimeoutSec 10).access_token
+            } catch { Start-Sleep -Seconds 5 }
+          }
+          & $hostExe status
+          if (-not $token) { throw 'no login as admin/admin within 5 minutes of the upgrade' }
+          "ok   login after the upgrade"
+
+      - name: Collect logs
+        if: ${{ always() }}
+        run: |
+          $out = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'logs')
+          Copy-Item "$env:RUNNER_TEMP\*.log" $out -ErrorAction SilentlyContinue
+          foreach ($d in 'install-logs', 'host-logs', 'logs') {
+            $src = "C:\ProgramData\TreeAlarm\VMS\$d"
+            if (Test-Path $src) { Copy-Item $src (Join-Path $out $d) -Recurse }
+          }
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: upgrade-logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 14
+
+  release:
+    needs: [installer, upgrade]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -248,7 +361,8 @@ jobs:
           **TreeAlarm VMS is a video management system you run yourself.** It records, stores and plays back video from IP cameras over ONVIF and RTSP, streams live video to the browser over WebRTC, and runs on your own hardware with no cloud account. See the [ta_vms README](https://github.com/treealarm/ta_vms#readme).
 
           ### Downloads
-          - **ta_vms-setup-x64.exe**: Windows installer, no Docker needed (Windows 10 1809 / Server 2019 or later, x64). Installs PostgreSQL, RabbitMQ, MediaMTX, Dapr and every service as native Windows services. It leaves out the analytics worker, ROI re-compression and hardware encoding; see [windows/README.md](https://github.com/treealarm/ta_install/blob/$TAG/windows/README.md). The installer is not code-signed yet, so SmartScreen asks before running it (More info, Run anyway).
+          - **ta_vms-setup-x64.exe**: Windows installer, no Docker needed (Windows 10 1809 / Server 2019 or later, x64). Installs PostgreSQL, RabbitMQ, MediaMTX, Dapr and every service as native Windows services. It leaves out the analytics worker, ROI re-compression and hardware encoding; see [windows/README.md](https://github.com/treealarm/ta_install/blob/$TAG/windows/README.md). The installer is not code-signed yet, so SmartScreen asks before running it (More info, Run anyway). Unattended: `ta_vms-setup-x64.exe /quiet /norestart StorageFolder=D:\TreeAlarm`.
+          - **ta_vms-x64.msi**: the same installation as a bare MSI, for Group Policy or Intune, on machines that already have the VC++, .NET 10 and ASP.NET Core 10 runtimes (setup.exe installs those itself).
           - **ta_vms-docker.zip**: the Docker Compose stack for Linux, with the analytics worker. Unzip, then `cd ta_vms && docker compose --env-file .env up -d`. It pulls the `treealarm/*:latest` images from Docker Hub, so it always runs the newest build; its README lists the defaults to replace before a real deployment.
 
           The web interface opens on port 5134; the first sign-in is admin / admin, which then has to set a new password. Users are added on port 8013. Uninstalling, or `docker compose down`, keeps the data: `C:\ProgramData\TreeAlarm\VMS` on Windows, `./data` beside the compose file.
@@ -256,5 +370,5 @@ jobs:
           The Windows installer is built from ta_vms [`$SHORT_COMMIT`](https://github.com/treealarm/ta_vms/commit/$TA_VMS_COMMIT) and multitenant_admin [`$SHORT_MT_ADMIN`](https://github.com/treealarm/multitenant_admin/commit/$MT_ADMIN_COMMIT).
           EOF
           cat "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" dist/ta_vms-setup-x64.exe dist/ta_vms-docker.zip \
+          gh release create "$TAG" dist/ta_vms-setup-x64.exe dist/ta_vms-x64.msi dist/ta_vms-docker.zip \
             --verify-tag --title "TreeAlarm VMS $VERSION" --notes-file "$RUNNER_TEMP/notes.md"

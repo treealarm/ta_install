@@ -3,7 +3,7 @@
   Stops every TreeAlarm VMS process on this machine, so that its files can be replaced or removed.
 
 .DESCRIPTION
-  Run by the installer before it copies files (an upgrade) and by Uninstall-TaVms.ps1. Stops the
+  Run by the MSI when an upgrade removes the version before it, and by Uninstall-TaVms.ps1. Stops the
   services in dependency order, then ends anything still running from its component directories:
   epmd, which the Erlang runtime leaves behind when RabbitMQ stops, and any child a crashed
   supervisor did not take down with it. Windows PowerShell 5.1.
@@ -13,6 +13,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The MSI passes directories as "<dir>\.", a bare trailing backslash would escape the closing quote.
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
 
 foreach ($name in 'TaVmsHost', 'TaVms.RabbitMQ', 'TaVms.Postgres') {
   $service = Get-Service $name -ErrorAction SilentlyContinue
@@ -23,11 +25,10 @@ foreach ($name in 'TaVmsHost', 'TaVms.RabbitMQ', 'TaVms.Postgres') {
   }
 }
 
-# Only the component directories: the installation directory itself holds unins000.exe, which is
-# the very process running this script during an uninstall.
+# Only the component directories: nothing else in the installation directory runs.
 $root = Resolve-Path $InstallDir -ErrorAction SilentlyContinue
 if ($root) {
-  $prefixes = 'host', 'vms', 'dotnet', 'dapr', 'mediamtx', 'pgsql', 'erlang', 'rabbitmq' |
+  $prefixes = 'host', 'vms', 'dotnet', 'dapr', 'mediamtx', 'pgsql', 'erlang', 'rabbitmq', 'keycloak', 'jre', 'mt_admin' |
     ForEach-Object { (Join-Path $root.Path $_) + '\' }
   Get-Process | Where-Object {
     $path = $_.Path

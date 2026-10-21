@@ -20,18 +20,29 @@ this machine.
 
 ## Install
 
-Run the installer as an administrator. It asks for one thing, the folder for recordings: pick a
-large disk. Unattended:
+Run the installer as an administrator. Options lets you choose the program folder and the folder
+for recordings: pick a large disk for the second. Unattended:
 
 ```
-ta_vms-setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /STORAGE=D:\TreeAlarm
+ta_vms-setup-x64.exe /quiet /norestart /log setup.log StorageFolder=D:\TreeAlarm
 ```
 
-Then open `http://localhost:5134`.
+`InstallFolder=<dir>` moves the program as well. Both names are case-sensitive, and both are fixed
+by the first install: an upgrade keeps them. Then open `http://localhost:5134`.
 
-Running the installer again over an existing installation upgrades it and keeps the data.
-Uninstalling removes the program and the services and **keeps the data directory** — the database,
-the recordings and the passwords. Delete `C:\ProgramData\TreeAlarm\VMS` by hand to remove those too.
+`ta_vms-setup-x64.exe` is a WiX bundle. It installs the VC++, .NET and ASP.NET Core runtimes the
+services need, when missing, and then `ta_vms-x64.msi`, which the release also carries on its own:
+for software distribution (Group Policy, Intune) to machines that have the runtimes already,
+
+```
+msiexec /i ta_vms-x64.msi /qn STORAGEPATH=D:\TreeAlarm /l*v ta_vms.log
+```
+
+Running a newer installer over an existing installation upgrades it and keeps the data; so does the
+first WiX one (0.1.6) over an Inno Setup installation of 0.1.5 or before, which it uninstalls first.
+Uninstalling (Apps and Features, or `ta_vms-setup-x64.exe /uninstall /quiet`) removes the program
+and the services and **keeps the data directory**: the database, the recordings and the passwords.
+Delete `C:\ProgramData\TreeAlarm\VMS` by hand to remove those too.
 
 ## What runs
 
@@ -84,9 +95,15 @@ Everything the installer ships is laid out by `scripts/Build-Stage.ps1`, from tw
 - the third-party components pinned in `versions.json` (PostgreSQL, Erlang/OTP, RabbitMQ, Dapr,
   MediaMTX, the .NET runtimes), each checked against its hash.
 
-`installer/ta_vms.iss` (Inno Setup 6) packs that directory and runs `scripts/Install-TaVms.ps1`
-after copying it. The scripts do the actual work and run on their own as well (Windows PowerShell
-5.1, elevated):
+`installer/Package` (WiX 5, `ta_vms-x64.msi`) installs that directory and runs
+`scripts/Install-TaVms.ps1` after copying it; `installer/Bundle` (`ta_vms-setup-x64.exe`) runs the
+runtime installers from `redist\` and then the MSI:
+
+```
+dotnet build installer/Bundle/Bundle.wixproj -c Release -p:StageDir=<stage> -p:Version=<x.y.z>
+```
+
+The scripts do the actual work and run on their own as well (Windows PowerShell 5.1, elevated):
 
 ```
 .\scripts\Install-TaVms.ps1 -InstallDir <dir> [-StoragePath <dir>]

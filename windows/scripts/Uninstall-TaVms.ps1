@@ -3,7 +3,8 @@
   Removes the TreeAlarm VMS services, the firewall rules and nothing else.
 
 .DESCRIPTION
-  Run by the uninstaller before it deletes the installation directory. The data directory --
+  Run by the uninstaller (the MSI) before it deletes the installation directory, and by the MSI's
+  rollback of a first install that failed. The data directory --
   database, recordings, logs, site.env with its passwords -- is left in place: removing the program
   is not a decision to destroy the archive. Delete it by hand if that is what is wanted.
   Windows PowerShell 5.1.
@@ -14,6 +15,10 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+
+# The MSI passes directories as "<dir>\.", a bare trailing backslash would escape the closing quote.
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$DataDir = [IO.Path]::GetFullPath($DataDir)
 
 $logDir = Join-Path $DataDir 'install-logs'
 New-Item -ItemType Directory -Force $logDir | Out-Null
@@ -43,6 +48,12 @@ Get-NetFirewallRule -Group 'TreeAlarm VMS' -ErrorAction SilentlyContinue | Remov
 # Again, now that the services are gone: whatever removing them started (pg_ctl, erlsrv) must not
 # keep a file of the installation directory open while the uninstaller deletes it.
 & (Join-Path $PSScriptRoot 'Stop-TaVms.ps1') -InstallDir $InstallDir
+
+# What the services wrote beside themselves, which the MSI does not know about and would otherwise
+# leave behind, keeping the installation directory from being removed: Keycloak's temporary files
+# and transaction log. Its realm file, in data\import, is the MSI's own.
+Get-ChildItem (Join-Path $InstallDir 'keycloak\data') -Force -ErrorAction SilentlyContinue |
+  Where-Object Name -ne 'import' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Services removed. Data kept in $DataDir"
 Stop-Transcript | Out-Null

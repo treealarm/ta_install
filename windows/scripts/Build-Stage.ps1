@@ -19,14 +19,16 @@
     keycloak\   Keycloak, built for PostgreSQL, with the realm to import in data\import
     jre\        the Java runtime Keycloak runs on
     mt_admin\   the user administration (multitenant_admin, standalone mode)
-    redist\     installers of the .NET, ASP.NET Core and VC++ runtimes
+    redist\     installers of the .NET, ASP.NET Core and VC++ runtimes, and redist.wxi describing
+                them; run by the bundle, not installed
     config\     ta_vms.env (= ../.env), windows.env, services.json
     setup\      the scripts the installer runs
     licenses\   licence texts the components' own archives do not carry: ta_vms's, those of the
                 vcpkg libraries beside vms.exe (from the ta_vms build), Erlang/OTP's and Dapr's
     LICENSE.txt, THIRD-PARTY-NOTICES.txt
 
-  installer\ta_vms.iss packs that directory as it is.
+  installer\Package (the MSI) installs that directory as it is, redist\ aside; installer\Bundle
+  (setup.exe) runs the runtime installers and then the MSI.
 #>
 param(
   [Parameter(Mandatory)] [string] $TaVmsZip,
@@ -129,6 +131,21 @@ Get-ChildItem (Join-Path $Stage 'erlang\lib') -Directory | ForEach-Object {
 Expand-Into (Get-Component 'rabbitmq') (Join-Path $Stage 'rabbitmq') "rabbitmq_server-$($versions.rabbitmq.version)"
 
 Copy-Item (Get-Component 'dotnet'), (Get-Component 'aspnetcore') (Join-Path $Stage 'redist')
+# What the bundle (installer\Bundle) needs to know about these to tell whether a machine already has
+# them: the VC++ build it carries, the runtime versions and installer names.
+$redist = Join-Path $Stage 'redist'
+$vcBuild = ([version] (Get-Item (Join-Path $redist 'vc_redist.x64.exe')).VersionInfo.FileVersion).Build
+Set-Content -Path (Join-Path $redist 'redist.wxi') -Encoding utf8 -Value @(
+  '<?xml version="1.0" encoding="utf-8"?>',
+  '<!-- Written by scripts/Build-Stage.ps1. -->',
+  '<Include>',
+  "  <?define VcRedistBld = $vcBuild ?>",
+  "  <?define DotnetVersion = $($versions.dotnet.version) ?>",
+  "  <?define DotnetInstaller = $([IO.Path]::GetFileName((Get-Component 'dotnet'))) ?>",
+  "  <?define AspNetCoreVersion = $($versions.aspnetcore.version) ?>",
+  "  <?define AspNetCoreInstaller = $([IO.Path]::GetFileName((Get-Component 'aspnetcore'))) ?>",
+  '</Include>'
+)
 
 # Keycloak and the Java runtime it runs on. Built for PostgreSQL here, once, so that the installed
 # server starts --optimized instead of rebuilding itself on every start; the realm it imports on its
