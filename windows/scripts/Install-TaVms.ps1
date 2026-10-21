@@ -8,7 +8,8 @@
   Docker would otherwise provide:
 
     1. the VC++, .NET and ASP.NET Core runtimes, if missing
-    2. <DataDir>\config\site.env on first install: generated passwords, free ports, storage paths
+    2. <DataDir>\config\site.env: generated passwords, free ports, storage paths; an upgrade adds
+       only the settings a newer version introduced
     3. data directories and their ACLs (the services run as LocalService; passwords readable only
        by administrators and the services)
     4. PostgreSQL: initdb on first install, service TaVms.Postgres (NetworkService)
@@ -136,27 +137,46 @@ function Install-Runtimes {
 }
 
 function New-SiteEnv([string] $path) {
+  # Generated for this machine. A new installation gets all of them; an upgrade gets only the ones a
+  # newer version introduced, and nothing already in the file is touched: PostgreSQL, RabbitMQ and
+  # Keycloak were set up with what is there.
+  $generated = [ordered]@{
+    POSTGRES_PORT             = { Get-FreePort 5432 }
+    POSTGRES_PASSWORD         = { New-Secret }
+    RABBITMQ_PORT             = { Get-FreePort 5672 }
+    RABBITMQ_MANAGEMENT_PORT  = { Get-FreePort 15672 }
+    RABBITMQ_DEFAULT_PASS     = { New-Secret }
+    VMS_MEDIAMTX_PUBLISH_PASS = { New-Secret }
+    VMS_MEDIAMTX_READ_PASS    = { New-Secret }
+    VMS_WHEP_SESSION_KEY      = { New-SessionKey }
+    # Keycloak's own administrator (master realm). Keycloak takes it on its first start only.
+    KEYCLOAK_ADMIN_PASSWORD   = { New-Secret }
+  }
+
   if (Test-Path $path) {
-    Write-Step "$path exists, kept"
+    $present = @(Get-Content $path | Where-Object { $_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=' } | ForEach-Object { $Matches[1] })
+    $missing = @($generated.Keys | Where-Object { $present -notcontains $_ })
+    if ($missing.Count -eq 0) {
+      Write-Step "$path exists, kept"
+      return
+    }
+    Write-Step "$path exists, adding $($missing -join ', ')"
+    # A file last saved by hand may not end in a newline, and the first line added would join it.
+    $text = [IO.File]::ReadAllText($path)
+    if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { [IO.File]::AppendAllText($path, [Environment]::NewLine) }
+    [IO.File]::AppendAllLines($path, [string[]] ($missing | ForEach-Object { "$_=$(& $generated[$_])" }))
     return
   }
+
   Write-Step "writing $path"
   $lines = @(
     '# This installation''s own settings, written once by the installer and kept by upgrades.',
     '# Overrides ta_vms.env and windows.env in the installation directory. TaVmsHost reads it on',
     '# start: restart the "TreeAlarm VMS" service after a change.',
     '#',
-    '# The passwords below were generated for this machine. PostgreSQL and RabbitMQ were set up',
-    '# with them; changing one here alone breaks the connection to that server.',
-    "POSTGRES_PORT=$(Get-FreePort 5432)",
-    "POSTGRES_PASSWORD=$(New-Secret)",
-    "RABBITMQ_PORT=$(Get-FreePort 5672)",
-    "RABBITMQ_MANAGEMENT_PORT=$(Get-FreePort 15672)",
-    "RABBITMQ_DEFAULT_PASS=$(New-Secret)",
-    "VMS_MEDIAMTX_PUBLISH_PASS=$(New-Secret)",
-    "VMS_MEDIAMTX_READ_PASS=$(New-Secret)",
-    "VMS_WHEP_SESSION_KEY=$(New-SessionKey)"
-  )
+    '# The passwords below were generated for this machine. PostgreSQL, RabbitMQ and Keycloak were',
+    '# set up with them; changing one here alone breaks the connection to that server.'
+  ) + @($generated.Keys | ForEach-Object { "$_=$(& $generated[$_])" })
   if ($StoragePath) {
     $lines += "VMS_STORAGE_BASE_PATH=$(Join-Path $StoragePath 'media_storage')"
     $lines += "VMS_EXPORT_BASE_PATH=$(Join-Path $StoragePath 'exports')"
@@ -178,6 +198,9 @@ function Initialize-DataDirectories {
   # administrator group from its own token, and would otherwise be locked out of the directory.
   $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   Grant-Access (Join-Path $DataDir 'postgres') @("${SidAdmins}:(OI)(CI)F", "${SidSystem}:(OI)(CI)F", "${SidNetworkService}:(OI)(CI)F", "*${me}:(OI)(CI)F") -Private
+  # Keycloak writes its temporary files and transaction log beside itself, in the installation
+  # directory, which is otherwise read-only to the services.
+  Grant-Access (Join-Path $InstallDir 'keycloak\data') @("${SidLocalService}:(OI)(CI)M")
   # RabbitMQ (erlsrv) runs as LocalSystem.
   Grant-Access (Join-Path $DataDir 'rabbitmq') @("${SidAdmins}:(OI)(CI)F", "${SidSystem}:(OI)(CI)F") -Private
 

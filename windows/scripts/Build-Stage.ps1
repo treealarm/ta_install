@@ -16,6 +16,8 @@
     pgsql\      PostgreSQL binaries (pgAdmin, StackBuilder and the docs left out)
     erlang\     Erlang/OTP, portable
     rabbitmq\   RabbitMQ server
+    keycloak\   Keycloak, built for PostgreSQL, with the realm to import in data\import
+    jre\        the Java runtime Keycloak runs on
     redist\     installers of the .NET, ASP.NET Core and VC++ runtimes
     config\     ta_vms.env (= ../.env), windows.env, services.json
     setup\      the scripts the installer runs
@@ -120,6 +122,20 @@ Get-ChildItem (Join-Path $Stage 'erlang\lib') -Directory | ForEach-Object {
 Expand-Into (Get-Component 'rabbitmq') (Join-Path $Stage 'rabbitmq') "rabbitmq_server-$($versions.rabbitmq.version)"
 
 Copy-Item (Get-Component 'dotnet'), (Get-Component 'aspnetcore') (Join-Path $Stage 'redist')
+
+# Keycloak and the Java runtime it runs on. Built for PostgreSQL here, once, so that the installed
+# server starts --optimized instead of rebuilding itself on every start; the realm it imports on its
+# first start is the one the Docker deployment mounts.
+Expand-Into (Get-Component 'jre') (Join-Path $Stage 'jre') "jdk-$($versions.jre.version)-jre"
+Expand-Into (Get-Component 'keycloak') (Join-Path $Stage 'keycloak') "keycloak-$($versions.keycloak.version)"
+$import = New-Item -ItemType Directory -Force (Join-Path $Stage 'keycloak\data\import')
+Copy-Item (Join-Path $repo 'init_files\keycloak\realm.json') $import
+$env:JAVA_HOME = Join-Path $Stage 'jre'
+& (Join-Path $Stage 'keycloak\bin\kc.bat') build --db=postgres
+if ($LASTEXITCODE -ne 0) { throw 'kc build failed' }
+Remove-Item env:JAVA_HOME
+# What the build left behind besides itself; the import directory stays.
+Remove-Item (Join-Path $Stage 'keycloak\data\tmp') -Recurse -Force -ErrorAction SilentlyContinue
 
 # Configuration and the scripts the installer runs.
 $config = New-Item -ItemType Directory -Force (Join-Path $Stage 'config')

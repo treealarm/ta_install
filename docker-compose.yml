@@ -2,8 +2,8 @@
 # `profiles:` gating — every service starts on a plain `docker compose up`, independent of
 # Square/multitenant_admin. Pulls prebuilt `treealarm/...` images published by
 # scripts/push-images.sh (built by scripts/build-images.sh from sibling ta_vms / video_a
-# checkouts). Square integration stays off by default (KEYCLOAK_URL,
-# SQUARE_INTEGRATION_SINK_APP_ID empty in .env) per ta_vms CLAUDE.md's env-gating rule.
+# checkouts). Square integration stays off by default (SQUARE_INTEGRATION_SINK_APP_ID empty in
+# .env) per ta_vms CLAUDE.md's env-gating rule; login is on, through the keycloak service below.
 x-data-volume: &data-volume
   - ./data:/data
 
@@ -81,6 +81,36 @@ services:
       timeout: 10s
       retries: 12
       start_period: 20s
+
+  # Users and login (see KEYCLOAK_* in .env). web_vms is its only client and reaches it over the
+  # compose network, so tokens carry http://keycloak:8080 as their issuer; the browser never talks to
+  # it. The realm is imported once, on the first start, from init_files/keycloak.
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_KEYCLOAK_DB}"
+      KC_DB_USERNAME: "${POSTGRES_USER}"
+      KC_DB_PASSWORD: "${POSTGRES_PASSWORD}"
+      # Plain HTTP on the internal network, and any host name: web_vms calls it as "keycloak", the
+      # administration console is opened as 127.0.0.1.
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN_USER}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD}"
+      # Read by realm.json's placeholders.
+      KEYCLOAK_REALM_NAME: "${KEYCLOAK_REALM_NAME}"
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID}"
+      # Keycloak sizes its heap from the machine's memory (70%) when given no limit.
+      JAVA_OPTS_KC_HEAP: "-Xms64m -Xmx512m"
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT}:8080"
+    volumes:
+      - ./init_files/keycloak:/opt/keycloak/data/import:ro
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
   mediamtx:
     image: bluenviron/mediamtx:latest
@@ -617,6 +647,7 @@ services:
       - vms
       - vmscfg
       - vmsfs
+      - keycloak
 
   web_vms-dapr:
     image: "daprio/daprd:latest"

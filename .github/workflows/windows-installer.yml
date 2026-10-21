@@ -107,18 +107,52 @@ jobs:
 
       # Each of these goes browser -> web_srv -> its sidecar -> another app's sidecar -> the app
       # (-> PostgreSQL), so a 200 means name resolution, the components and the databases all work.
+      # They need a login first, which proves Keycloak came up with its realm: the initial
+      # admin/admin, made to set a new password, as a person would on the first visit.
       - name: Smoke test
         timeout-minutes: 10
         run: |
           $hostExe = 'C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe'
-          $port = & $hostExe env WEB_VMS_PORT
-          $paths = '/', '/api/recording-profiles', '/api/media-mtx/servers', '/api/entitystate'
+          $base = "http://localhost:$(& $hostExe env WEB_VMS_PORT)"
           $deadline = (Get-Date).AddMinutes(5)
+
+          function Get-Roles([string] $jwt) {
+            $body = $jwt.Split('.')[1].Replace('-', '+').Replace('_', '/')
+            $body += '=' * ((4 - $body.Length % 4) % 4)
+            ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body)) | ConvertFrom-Json).realm_access.roles
+          }
+
+          $token = $null
+          while (-not $token -and (Get-Date) -lt $deadline) {
+            try {
+              $token = (Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
+                -Body '{"username":"admin","password":"admin"}' -TimeoutSec 10).access_token
+            } catch { Start-Sleep -Seconds 5 }
+          }
+          if (-not $token) { & $hostExe status; throw 'no login as admin/admin within 5 minutes' }
+          "ok   login"
+          if ((Get-Roles $token) -contains 'password-change-required') {
+            $r = Invoke-WebRequest "$base/api/auth/change-password" -Method Post -ContentType 'application/json' `
+              -Headers @{ Authorization = "Bearer $token" } -SkipHttpErrorCheck `
+              -Body '{"currentPassword":"admin","newPassword":"smoke-test-password"}'
+            # A ta_vms build from before the change-password endpoint: the role means nothing to it.
+            if ($r.StatusCode -eq 200) {
+              $token = ($r.Content | ConvertFrom-Json).access_token
+              if ((Get-Roles $token) -contains 'password-change-required') { throw 'the new token still demands a password change' }
+              "ok   password changed"
+            } elseif ($r.StatusCode -ne 404) { throw "change-password answered $($r.StatusCode): $($r.Content)" }
+          }
+
+          $anonymous = Invoke-WebRequest "$base/api/recording-profiles" -SkipHttpErrorCheck
+          if ($anonymous.StatusCode -ne 401) { throw "without a token /api/recording-profiles answered $($anonymous.StatusCode), not 401" }
+          "ok   anonymous call refused"
+
+          $paths = '/', '/api/recording-profiles', '/api/media-mtx/servers', '/api/entitystate'
           $pending = [Collections.Generic.List[string]]::new([string[]] $paths)
           while ($pending.Count -gt 0 -and (Get-Date) -lt $deadline) {
             foreach ($path in @($pending)) {
               try {
-                $r = Invoke-WebRequest "http://localhost:$port$path" -TimeoutSec 10 -SkipHttpErrorCheck
+                $r = Invoke-WebRequest "$base$path" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 10 -SkipHttpErrorCheck
                 if ($r.StatusCode -eq 200) { "ok   $path"; $pending.Remove($path) | Out-Null }
               } catch { }
             }
@@ -201,7 +235,7 @@ jobs:
           - **ta_vms-setup-x64.exe**: Windows installer, no Docker needed (Windows 10 1809 / Server 2019 or later, x64). Installs PostgreSQL, RabbitMQ, MediaMTX, Dapr and every service as native Windows services. It leaves out the analytics worker, ROI re-compression and hardware encoding; see [windows/README.md](https://github.com/treealarm/ta_install/blob/$TAG/windows/README.md). The installer is not code-signed yet, so SmartScreen asks before running it (More info, Run anyway).
           - **ta_vms-docker.zip**: the Docker Compose stack for Linux, with the analytics worker. Unzip, then `cd ta_vms && docker compose --env-file .env up -d`. It pulls the `treealarm/*:latest` images from Docker Hub, so it always runs the newest build; its README lists the defaults to replace before a real deployment.
 
-          The web interface opens on port 5134, with no login. Uninstalling, or `docker compose down`, keeps the data: `C:\ProgramData\TreeAlarm\VMS` on Windows, `./data` beside the compose file.
+          The web interface opens on port 5134; the first sign-in is admin / admin, which then has to set a new password. Uninstalling, or `docker compose down`, keeps the data: `C:\ProgramData\TreeAlarm\VMS` on Windows, `./data` beside the compose file.
 
           The Windows installer is built from ta_vms [`$SHORT_COMMIT`](https://github.com/treealarm/ta_vms/commit/$TA_VMS_COMMIT).
           EOF

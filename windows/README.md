@@ -7,10 +7,14 @@ processes, on one machine. Download it from the
 build as an artifact, and publishes it to a release on a `vX.Y.Z` tag.
 
 **Not in the Windows version:** `roitrc` (ROI re-compression of clips) and the analytics worker —
-neither builds for Windows —, the Square integration and the Keycloak login. Live HEVC is
-re-encoded for WebRTC on the CPU: there is no hardware encoder for Windows yet. The web UI has no
-login, exactly like the compose stack with `KEYCLOAK_URL` empty: anyone who can reach port 5134
-can use it.
+neither builds for Windows — and the Square integration. Live HEVC is re-encoded for WebRTC on the
+CPU: there is no hardware encoder for Windows yet.
+
+**Login** goes through a Keycloak that the installer ships with its Java runtime, on the loopback
+(`127.0.0.1:5160`). The first sign-in is `admin` / `admin`, and the web UI makes that account set a
+new password before anything else. Keycloak's own administrator is `admin` with the password
+generated into `site.env` (`KEYCLOAK_ADMIN_PASSWORD`); its console, at `http://127.0.0.1:5160` on
+this machine, is where users are created (realm `tavms`, role `admin` for administrators).
 
 ## Install
 

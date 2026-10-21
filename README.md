@@ -33,12 +33,21 @@ come up together. The first start takes longer while images are pulled.
   (`8888`) is deliberately not published: archive HLS is served by the gateway on `5134`.
 - Video analytics: person/vehicle + face detection with crops in the Events gallery
 
-Square integration is **off by default** — `KEYCLOAK_URL` and `SQUARE_*` vars are empty in
-`.env`, so the UI runs with no login screen and no push to Square.
+**Login.** The stack runs its own Keycloak (`keycloak` service; its console on
+`http://127.0.0.1:8180`, `KEYCLOAK_PORT`). The first sign-in is `admin` / `admin`, and the web UI
+makes that account set a new password before anything else. Users are created in Keycloak's
+console, realm `tavms`: give administrators the realm role `admin`; everyone else sees only the
+cameras granted to them on the Permissions page.
+
+Square integration is **off by default**: the `SQUARE_*` vars are empty in `.env`, so nothing is
+pushed to Square.
 
 ## Before a real deployment
 
 `.env` ships working defaults so the stack starts unattended. Replace these:
+
+- `KEYCLOAK_ADMIN_PASSWORD` — Keycloak's own administrator (master realm), set on its first start;
+  changing it in `.env` later does not change it in Keycloak.
 
 - `VMS_MEDIAMTX_PUBLISH_PASS` / `VMS_MEDIAMTX_READ_PASS` — anyone with them can pull or overwrite
   any camera stream straight from MediaMTX.

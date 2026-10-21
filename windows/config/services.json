@@ -39,6 +39,32 @@
         "MTX_SRT": "no"
       },
       "readyPort": "9997"
+    },
+    {
+      // Users and login. Built for PostgreSQL when the installer was made (Build-Stage.ps1 runs
+      // `kc build`), so it starts --optimized; the realm is imported from keycloak\data\import on
+      // the first start and left alone afterwards. Only web-vms talks to it, on the loopback.
+      "name": "keycloak",
+      "exe": "keycloak\\bin\\kc.bat",
+      "args": ["start", "--optimized", "--import-realm"],
+      "env": {
+        "JAVA_HOME": "${TAVMS_HOME}\\jre",
+        "KC_DB_URL": "jdbc:postgresql://127.0.0.1:${POSTGRES_PORT}/${POSTGRES_KEYCLOAK_DB}",
+        "KC_DB_USERNAME": "${POSTGRES_USER}",
+        "KC_DB_PASSWORD": "${POSTGRES_PASSWORD}",
+        "KC_HTTP_ENABLED": "true",
+        "KC_HTTP_HOST": "127.0.0.1",
+        "KC_HTTP_PORT": "${KEYCLOAK_PORT}",
+        "KC_HOSTNAME_STRICT": "false",
+        "KC_BOOTSTRAP_ADMIN_USERNAME": "${KEYCLOAK_ADMIN_USER}",
+        "KC_BOOTSTRAP_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD}",
+        // Read by realm.json's placeholders.
+        "KEYCLOAK_REALM_NAME": "${KEYCLOAK_REALM_NAME}",
+        "KEYCLOAK_CLIENT_ID": "${KEYCLOAK_CLIENT_ID}",
+        // Keycloak sizes its heap from the machine's memory (70%) when given no limit.
+        "JAVA_OPTS_KC_HEAP": "-Xms64m -Xmx512m"
+      },
+      "readyPort": "${KEYCLOAK_PORT}"
     }
   ],
   "apps": [

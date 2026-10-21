@@ -52,6 +52,8 @@ Type: filesandordirs; Name: "{app}\mediamtx"
 Type: filesandordirs; Name: "{app}\pgsql"
 Type: filesandordirs; Name: "{app}\erlang"
 Type: filesandordirs; Name: "{app}\rabbitmq"
+Type: filesandordirs; Name: "{app}\keycloak"
+Type: filesandordirs; Name: "{app}\jre"
 Type: filesandordirs; Name: "{app}\redist"
 Type: filesandordirs; Name: "{app}\config"
 Type: filesandordirs; Name: "{app}\setup"
@@ -79,6 +81,8 @@ Filename: "{app}\TreeAlarm VMS.url"; Description: "Open TreeAlarm VMS"; \
 
 [UninstallDelete]
 Type: files; Name: "{app}\TreeAlarm VMS.url"
+; What Keycloak wrote at run time (keycloak\data): temporary files and its transaction log.
+Type: filesandordirs; Name: "{app}\keycloak"
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
