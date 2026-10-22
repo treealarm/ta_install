@@ -3,6 +3,66 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-22: HEVC transcoding on NVENC (GeForce GTX 1050 Ti)
+
+The v0.1.6 installation with only `vms` replaced by CI builds of ta_vms' `nvenc` branch
+(roi_transcode's `Engine::Nvenc`: `h264_nvenc` through libavcodec on a CUDA device, the decoder on
+the same device). The same source as the CPU measurement below: 1080p25 HEVC at 4 Mbit/s
+(`testsrc2`, libx265) published from the LAN into the machine's MediaMTX, `transcode_hevc` on,
+viewers in headless Chrome on another machine, CPU over 60 s.
+
+| One stream, one viewer | vms CPU | of the machine | what the viewer got |
+|---|---|---|---|
+| libx264 (`video_transcode_processor`), same day | 121 % of a core | 44 % | 25 fps, 3.9 Mbit/s |
+| NVENC, constant QP (first build) | 7 % of a core | 26 % | 10 Mbit/s, losses and freezes |
+| NVENC, VBR at the target (fixed) | 7–12 % of a core | 32 % | 25 fps, 3.9 Mbit/s, no loss |
+
+- vms logs `decoding on cuda, encoding on 'h264_nvenc (NVIDIA NVENC, no regions)'`: NVDEC to
+  NVENC without leaving the card. VA-API is tried first and declines in the same millisecond.
+- **Fixed: the bitrate.** The first build ran NVENC at constant QP 23 and left the target to
+  ta_roienc's outer loop, as VA-API does. That loop's actuator is a QP offset on the background,
+  carried as a region, and libavcodec's nvenc reads no regions: the loop moved nothing and the
+  test pattern went out at 10 Mbit/s against a 3.9 Mbit/s target, 16 000 packets lost at the
+  start. NVENC now holds the target with its own VBR (roi_transcode f3ae689).
+- **Fixed: a warning on every stream start**, "bitstream SEI requested but not supported", and a
+  fallback counted for it: the live transcode asked for SEI it has nothing to put in (ta_vms
+  e702525; VA-API did the same on Linux).
+- **Eight sessions.** The ninth and tenth streams fail to open (`OpenEncodeSessionEx failed:
+  incompatible client key (21)`, the GeForce session limit) and go to libx264, as designed. With
+  eight on NVENC and two on libx264 the machine sat at 100 %.
+
+| Streams on NVENC, one viewer each | vms | MediaMTX | machine | encoder / decoder | VRAM |
+|---|---|---|---|---|---|
+| 1 | 7–12 % of a core | 16 % | 32 % | 5 % / 4 % | 0.6 GB |
+| 4 | 22 % | 31 % | 21 % | 22 % / 19 % | 1.5 GB |
+| 8 | 40 % | 64 % | 41 % | 35 % / 23 % | 2.7 GB |
+
+- The encoder keeps up with eight (25 fps each by `nvidia-smi`). Four viewers in one browser got
+  25 fps each, with losses only in the first ten seconds, when four sessions start at once.
+  Eight in one browser did not get a clean picture: MediaMTX logged `reader is too slow,
+  discarding frames` for every session, and the test machine, which also encoded the source with
+  libx265, stalled it for ten seconds. Not separated: delivering eight 1080p WebRTC streams needs a
+  test with the source and the viewers on different machines.
+
+Found on the way:
+- **Fixed: every ASP.NET service ran as Development** in both installs, inherited from the dev
+  `.env` (ta_install 378388c): Swagger UI was open on web_vms, and a request that threw got the
+  developer exception page with a stack trace. Run as Production on the box: every process up,
+  the API and live video the same.
+- **Fixed: the web interface's root answered 401** since Keycloak came with 0.1.5 — the
+  installer's shortcut opens exactly `http://localhost:5134/`. Routing runs before
+  `UseDefaultFiles`, so "/" reached the SPA fallback endpoint, which demanded a token; only
+  `/index.html` worked. The fallback is anonymous now (ta_vms dd4cfcb); with that build the root
+  answers 200 with the login form and the API still 401 without a token.
+- **Fixed: VmsFs crashed on every stop**, 19 times in its log since 2026-10-20: four of its
+  hosted services are registered twice, disposed twice, and the second dispose cancelled a
+  disposed token source. Usually the process exited anyway; once it hung, got killed at 8 s, and
+  the stop took 14 s instead of 8 (ta_vms 8a8e7e1).
+- Open: with the OnvifSim cameras unreachable, `vmsonvif-actors` fills a 10 MB log every 15
+  minutes — every SOAP request at debug level and each exception twice, through ASP.NET's console
+  logger and through Serilog. The Russian text of Windows socket errors arrives in the logs as
+  mojibake (the console's OEM code page read as UTF-8).
+
 ## 2026-10-22: v0.1.6, the first WiX build, upgraded from v0.1.5 (Inno Setup)
 
 The CI build of ta_install bb256ed (ta_vms 2851096), `ta_vms-setup-x64.exe /quiet /norestart`
