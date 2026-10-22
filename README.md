@@ -34,8 +34,8 @@ come up together. The first start takes longer while images are pulled.
 - Video analytics: person/vehicle + face detection with crops in the Events gallery
 
 **Login.** The stack runs its own Keycloak (`keycloak` service; its console on
-`http://127.0.0.1:8180`, `KEYCLOAK_PORT`). The first sign-in is `admin` / `admin`, and the web UI
-makes that account set a new password before anything else.
+`http://127.0.0.1:8180`, `KEYCLOAK_PORT`). The first sign-in is `admin` / `admin`; nothing makes anyone
+change a password, and whoever wants to does it in the web UI.
 
 **Users** are added at `http://<host>:8013` (`MT_ADMIN_PORT`, the `mt_admin` service), by the
 administrators of the web UI: new users, password resets, the administrator role. A new user, and

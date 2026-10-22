@@ -18,10 +18,6 @@
       {
         "name": "user",
         "description": "Sees the cameras granted to them"
-      },
-      {
-        "name": "password-change-required",
-        "description": "Must set a new password before doing anything else"
       }
     ]
   },
@@ -53,8 +49,7 @@
         }
       ],
       "realmRoles": [
-        "admin",
-        "password-change-required"
+        "admin"
       ]
     }
   ],

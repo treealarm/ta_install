@@ -39,8 +39,10 @@ later. setup.exe is 466 MB (Inno 0.1.5: 477), the bare MSI 410 MB.
 - **Stopping the service: 7.8 s, nothing killed.** vms 0.3 s after the request (it used to be
   killed at 8 s), Keycloak 1.3 s with no "Terminate batch job", vmsfs the slowest at 4.4 s.
   Starting it: 0.8 s for the service, the whole stack running within a minute.
-- The TreeAlarm admin was put back to `admin`/`admin` with `password-change-required` through
-  Keycloak's admin API: logs in, and gets 403 for the cameras until the password is changed.
+- The TreeAlarm admin was put back to `admin`/`admin` through Keycloak's admin API, first with
+  `password-change-required` (it logged in and got 403 for the cameras until the password changed),
+  then without it: the forced change is gone from the product (user, the same day), and admin
+  sees all seven cameras straight away.
 - The machine has an NVIDIA GeForce GTX 1050 Ti (driver 582.53, NVENC and NVDEC present), so a
   hardware encoder can be tried on it after all; the i5-750 itself has no Quick Sync.
 - Not checked yet: the wizard (GUI), a WiX-to-WiX upgrade with the two fixes, an uninstall.
