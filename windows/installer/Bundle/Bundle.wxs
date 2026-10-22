@@ -25,10 +25,7 @@
     UpgradeCode="C7DF5FE1-A0B6-4E34-B0F4-88A98C32F440"
     IconSourceFile="..\ta_vms.ico"
     AboutUrl="https://treealarm.dev"
-    HelpUrl="https://github.com/treealarm/ta_install/blob/main/windows/README.md"
-    DisableSystemRestore="yes">
-    <!-- No restore point: what it would save is the program folder, which an uninstall removes
-         anyway, and never the data. Creating one took 89 s on the test machine, and then failed. -->
+    HelpUrl="https://github.com/treealarm/ta_install/blob/main/windows/README.md">
 
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
@@ -78,7 +75,9 @@
     <!-- Cache="remove": nothing here needs its source again. The runtimes stay installed for good
          (other software may use them), and MSI keeps what it needs to uninstall ta_vms-x64.msi
          itself; caching the 500 MB package would only double what the installation takes. -->
-    <Chain>
+    <!-- No restore point: what it would save is the program folder, which an uninstall removes
+         anyway, and never the data. Creating one took 89 s on the test machine, and then failed. -->
+    <Chain DisableSystemRestore="yes">
       <!-- Detected rather than run every time: it does exit at once with 1638 when this or a newer
            build is there, but only after trying to create a System Restore point, which took 90 s
            on the test machine. 3010: installed, a restart pending; the services do not need one. -->
