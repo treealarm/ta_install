@@ -35,9 +35,13 @@
     <Property Id="ARPPRODUCTICON" Value="ta_vms.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://treealarm.dev" />
     <Property Id="ARPHELPLINK" Value="https://github.com/treealarm/ta_install/blob/main/windows/README.md" />
-    <!-- Restart Manager would offer to close, and then restart, the processes holding files: ours,
-         which the custom actions below stop in the order they depend on each other. -->
-    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+    <!-- Restart Manager finds the processes holding files, and only finds them: closing and
+         restarting them is the custom actions' job, which stop ours in the order they depend on each
+         other. Turning it off altogether ("Disable") is not the same thing. InstallValidate then
+         looks for the holder of every file it will replace the old way, process by process, and on
+         an upgrade, with the stack still running, that is thousands of files: 29 s on the test
+         machine. -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="DisableShutdown" />
 
     <!-- The data directory: database, recordings, logs, site.env. Never removed by an uninstall. -->
     <SetProperty Id="DATADIR" Value="[CommonAppDataFolder]TreeAlarm\VMS" Before="CostFinalize" Sequence="both" />

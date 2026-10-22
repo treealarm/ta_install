@@ -25,7 +25,10 @@
     UpgradeCode="C7DF5FE1-A0B6-4E34-B0F4-88A98C32F440"
     IconSourceFile="..\ta_vms.ico"
     AboutUrl="https://treealarm.dev"
-    HelpUrl="https://github.com/treealarm/ta_install/blob/main/windows/README.md">
+    HelpUrl="https://github.com/treealarm/ta_install/blob/main/windows/README.md"
+    DisableSystemRestore="yes">
+    <!-- No restore point: what it would save is the program folder, which an uninstall removes
+         anyway, and never the data. Creating one took 89 s on the test machine, and then failed. -->
 
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication

@@ -3,6 +3,48 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-22: v0.1.6, the first WiX build, upgraded from v0.1.5 (Inno Setup)
+
+The CI build of ta_install bb256ed (ta_vms 2851096), `ta_vms-setup-x64.exe /quiet /norestart`
+over the Inno Setup installation of 0.1.5: **335 s**, exit code 0, the web interface answering 4 s
+later. setup.exe is 466 MB (Inno 0.1.5: 477), the bare MSI 410 MB.
+
+| Phase | |
+|---|---|
+| Burn: detect, plan | 8 s |
+| system restore point, which then failed (VSS 0x8004230f) | 89 s |
+| caching the MSI | 6 s |
+| CostFinalize | 25 s |
+| InstallValidate: costing finishing, then files in use | 21 s + 29 s |
+| Inno Setup's uninstaller, stopping 0.1.5's stack | 32 s |
+| ProcessComponents | 4 s |
+| copying the files | 27 s |
+| `Install-TaVms.ps1` | 74 s |
+
+- **The restore point** is something Burn does before every per-machine apply unless told not
+  to; on the CI runners System Restore is off, so it never showed there. It would protect the
+  program folder, never the data. Fixed: `DisableSystemRestore="yes"`.
+- **Files in use, the slow way.** The stack still runs when InstallValidate looks at the files it
+  will replace, and it found 2468 of them held. With `MSIRESTARTMANAGERCONTROL=Disable` it looks
+  for each holder by walking the processes, 29 s; it also named WhatsApp and msedgewebview2 as
+  holders, for having a DLL of the same name loaded. Fixed: `DisableShutdown`, which detects
+  through Restart Manager and still never closes or restarts anything.
+- **The Inno step is a one-off** and was slow for the old reasons: 0.1.5's vms killed after 8 s,
+  its Keycloak after 5 s (both fixed in 0.1.6). A WiX-to-WiX upgrade stops the stack with
+  `Stop-TaVms.ps1` instead.
+- Checked after the upgrade: the three services running, `site.env` byte for byte the same, the
+  Inno registration and `unins000.exe` gone, one "TreeAlarm VMS" in Apps and Features (0.1.6).
+  Package Cache 540 MB before, 541 after: `Cache="remove"` leaves the MSI out of it, Burn keeps only
+  its own engine for the uninstall.
+- **Stopping the service: 7.8 s, nothing killed.** vms 0.3 s after the request (it used to be
+  killed at 8 s), Keycloak 1.3 s with no "Terminate batch job", vmsfs the slowest at 4.4 s.
+  Starting it: 0.8 s for the service, the whole stack running within a minute.
+- The TreeAlarm admin was put back to `admin`/`admin` with `password-change-required` through
+  Keycloak's admin API: logs in, and gets 403 for the cameras until the password is changed.
+- The machine has an NVIDIA GeForce GTX 1050 Ti (driver 582.53, NVENC and NVDEC present), so a
+  hardware encoder can be tried on it after all; the i5-750 itself has no Quick Sync.
+- Not checked yet: the wizard (GUI), a WiX-to-WiX upgrade with the two fixes, an uninstall.
+
 ## 2026-10-21: v0.1.5, upgraded from v0.1.4
 
 The first release with Keycloak and user administration (multitenant_admin). Upgrade
