@@ -413,8 +413,7 @@ services:
   node-vms:
     <<: [*node, *app]
     image: treealarm/vms:latest
-    # Its own node's ONVIF service, not the core's: only that one reaches the node's cameras.
-    environment: { APP_ID: "vms-${TAVMS_NODE_NAME}", DAPR_ONVIF_APP_ID: "vmsonvif-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3607", DAPR_GRPC_PORT: "41008" }
+    environment: { APP_ID: "vms-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3607", DAPR_GRPC_PORT: "41008" }
   node-vms-dapr:
     <<: [*node, *sidecar]
     environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vms-${TAVMS_NODE_NAME}.token" }
@@ -428,7 +427,7 @@ services:
   node-vmsfs:
     <<: [*node, *app]
     image: treealarm/vmsfs:latest
-    environment: { APP_ID: "vmsfs-${TAVMS_NODE_NAME}", DAPR_ONVIF_APP_ID: "vmsonvif-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3604", DAPR_GRPC_PORT: "41005" }
+    environment: { APP_ID: "vmsfs-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3604", DAPR_GRPC_PORT: "41005" }
   node-vmsfs-dapr:
     <<: [*node, *sidecar]
     environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vmsfs-${TAVMS_NODE_NAME}.token" }
