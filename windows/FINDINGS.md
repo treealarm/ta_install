@@ -5,6 +5,29 @@ checked, what happened, why, and what was done about it. Newest run first.
 
 ## 2026-10-23: the wizard, upgrading WiX 0.1.6 to WiX 0.1.6
 
+Four upgrades through the wizard, the stack running each time: the first by hand, the other three
+driven by UI Automation in the interactive session (started elevated, so no UAC prompt). Each
+over the build before it.
+
+| Build | Files In Use | Open | Install button to the end |
+|---|---|---|---|
+| c198af7 over bb256ed, by hand | twice, 96 applications, NVIDIA Overlay first | failed | 7 min 11 s |
+| 1e8d946 over c198af7 | Keycloak's java, then 112 applications | worked (elevated) | 5 min 15 s without the dialog |
+| 0c67096 over 1e8d946 | epmd.exe | worked, through Explorer | 4 min 26 s |
+| de6e28f over 0c67096 | none | worked, through Explorer | 4 min 23 s |
+
+- **Fixed: "Files In Use" on every upgrade.** InstallValidate asks who holds the files it will
+  replace, and the stack was still up: the old version's `TaVmsStop` runs only later, inside the
+  transaction. Restart Manager (`DisableShutdown`, 7091247) made the check faster, not quieter —
+  the dialog named Keycloak's java (Retry / Ignore / Exit), and the old package's removal checked
+  again (112 applications, 53 s; the first answer is remembered, so it did not ask twice). `/quiet`
+  answers the dialog by itself, which is why the CI upgrade job never showed it. An upgrade now
+  stops the services and ends whatever runs from the installation directory before InstallValidate
+  (447cf2e, de6e28f — epmd, which RabbitMQ leaves running, was next in line): 8 s, then 18 s and 3 s
+  for the two InstallValidates, no dialog.
+
+### The first run, by hand
+
 The CI build of ta_install c198af7 (ta_vms 8a8e7e1) over the installation of bb256ed, run by hand
 through the wizard for the first time: exit code 0, no restart, the web interface up. 7 min 11 s
 from the Install button to the end, of which 2 min 22 s were the old package's files-in-use
@@ -25,21 +48,22 @@ check and the user's answers to it.
   whole stack up, looked for holders the old way and reported 96 applications twice: ours, and
   everything with a DLL of the same name loaded — NVIDIA Overlay (`jre\bin\msvcp140.dll`),
   PhoneExperienceHost, OneDrive. The dialog shows only processes with a window, so it named
-  NVIDIA Overlay and none of ours. Already fixed for every later upgrade: the new package's
-  InstallValidate went through Restart Manager (`DisableShutdown`, 7091247), took 20 s and asked
-  nothing. Its "a critical application holds files in use, so a reboot will be necessary" did not
-  turn into a restart: the files were free by the time they were replaced.
+  NVIDIA Overlay and none of ours. The new package's own InstallValidate went through Restart
+  Manager and asked nothing this time; the next upgrades showed that was luck (above).
 - **Fixed: the Options page came back on an upgrade.** The bundle looked for
   `config\site.env` from its unelevated process; `config` is open to administrators only, so the
   search failed with "access denied" (0x80070005) and the bundle took the install for a first
   one. Setting the archive's place there would have been ignored silently, as `Install-TaVms.ps1`
   keeps the one in `site.env`. It looks for the `config` directory now, which an unelevated
   process can see: checked on the box with a limited token (a8e3157).
-- **Open: the Launch button did nothing.** Six clicks, six `Failed to launch target ...
+- **The Open button did nothing.** Six clicks, six `Failed to launch target ...
   TreeAlarm VMS.url` (0x80070483, no application associated). WixStdBA calls `ShellExecuteEx`
   with "open"; the same call with the same flags, the same path (doubled backslash and all) and
   system32-only DLL search opened the page in Chrome from an SSH session, from the interactive
-  session and from an MTA thread. Not reproduced outside the wizard.
+  session and from an MTA thread, and the wizard's own button worked when the wizard was started
+  elevated. Not reproduced, so not explained: the button now starts Explorer with the shortcut
+  (0c67096), which opened the page from a limited process and from the wizard. Not yet clicked in
+  a wizard started through the UAC prompt.
 - **The stop with the new VmsFs: 4.5 s, nothing killed.** VmsFs 0.9 s after the request (4.4 s
   and 7.0 s with the old one, which crashed on every stop), the whole stack 4.3 s. The old
   stack, stopped by the upgrade itself, took 10 s.
