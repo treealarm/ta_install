@@ -3,6 +3,85 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-23: a core and a node on two machines, both ways
+
+The installer of ta_install bf937ed (CI run 39997009100, ta_vms 49228fc), this box as one machine
+of the pair and the Linux machine next to it (compose, `treealarm/*:latest`) as the other. The
+Linux images carry daprd 1.19.0, the installer 1.18.7: the two talk without trouble.
+
+**A: the core here, the node on Linux.** `Role=core Address=192.168.1.100` over the standalone
+0.1.7 installation took 5.0 minutes and kept its data. Consul's server died twice before running:
+`sync ...\consul\raft\wal: Access is denied`. Its default log store, wal, fsyncs the directory
+whenever it opens or removes a segment, and Windows does not allow that on a directory handle; the
+third start found its files made and ran, until the next segment. `services.json` now gives the
+server `raft_logstore { backend = "boltdb" }`, and the CI's core job fails on any restart of
+Consul, Sentry or placement. With that, nothing restarted and all eleven sidecars were healthy.
+
+`TaVmsHost package asus` wrote a 1 948-byte package; the Linux machine joined with
+`distributed.sh join` and came up with its five services healthy in the core's Consul (16 checks,
+two members). Then, all through the core's web interface:
+
+- the real camera on the Linux machine's camera network (192.168.2.64) answered ONVIF through
+  `vmsonvif-asus`, 2.9 s for the profiles;
+- the MediaMTX server still named 127.0.0.1, as `TaVmsHost core` warns; with its host set to
+  192.168.1.100, `vms-asus` measured 2688×1520 and 640×360 at 25 fps and published both to the
+  core's MediaMTX, and Chrome played the main stream through the core's WHEP at 25 fps, no loss;
+- recording started once a storage on the node's own disk was assigned (none is by default, now in
+  the README); its clips were in the core's index and played back through the core;
+- the node's logs came through `vmslogger-asus`; its actors registered with the core's placement.
+
+From the LAN the core answered on what its role needs (5134, 8013, 8554, PostgreSQL 5434, RabbitMQ
+5672, placement 6050, Sentry 6055, Consul 8300 and 8301, the sidecars' 19011–19027), and also on
+MediaMTX's 8889 and 9997 (now on the core's address, behind its credentials), the health and metrics
+ports of Sentry and placement, Consul's 8302 (all in ta_vms `docs/future_plans/distributed-hardening.md`)
+and 5432, this box's own PostgreSQL. Closed: Consul's 8500, every sidecar API and every app port.
+This box's Ethernet is a Private network and its Private firewall profile is off, so here nothing is
+closed by the firewall: only what listens on the loopback is out of reach.
+
+**B: the core on Linux, the node here.** The core uninstalled in 2.4 minutes, its data directory
+moved aside. `Role=node NodePackage=... Address=192.168.1.100` took 1.2 minutes: no database,
+broker or web interface, the service up with `consul-agent` and five services healthy in the Linux
+core's Consul. A camera of OnvifSim (on the Linux machine) on `vms-win`: ONVIF profiles through
+`vmsonvif-win` (11 s, the first call), live video through the Linux core's WHEP, PTZ moved through
+the core, the archive in the core's index and played back, the logs through `vmslogger-win`. From
+the LAN the node answered on Consul's 8301 and the sidecars' 19013–19016 and 19018 only.
+
+Two things for ta_vms, written up there under `docs/future_plans/`: recording here began 96 s after
+the storage was assigned, against ten on the Linux node (`storage-assignment-delay.md`); and the
+Linux core's own VmsFs never subscribed to its topics at all, which TaVmsHost's start order hides on
+Windows (`streaming-subscription-recovery.md`).
+
+Taking the node off took 11 minutes, with the console user's game holding the CPU at 99%. Left on
+the box: nothing installed; the data directory of this test's core, which was the standalone
+installation before, moved to `C:\ProgramData\TreeAlarm\VMS.core-bak`.
+
+## 2026-10-23: an upgrade through the wizard that took 28 minutes
+
+The wizard upgrade to 0b04dab (from de6e28f) started at 16:23, was left on its last page, and
+was closed in the next session. Exit code 0, the stack up and the web interface answering; but
+16:26 to 16:54 in the MSI, against 4–7 minutes for the upgrades above. By its log (every line is
+the elevated part, `MSI (s)`):
+
+| Phase | |
+|---|---|
+| CostFinalize, MigrateFeatureStates, InstallValidate: costing 13 301 components | 196 s + 247 s + 308 s |
+| the old package's removal | 168 s |
+| TaVmsSetUp (Install-TaVms.ps1, the web interface's wait included) | 320 s |
+| committing, removing the rollback copies | 224 s |
+
+Costing alone took twelve minutes, where it takes under one; nothing in the MSI's own work
+explains that. The machine was in use meanwhile: the console session (another user) had Roblox
+running, which by the evening had 1 100 s of CPU, and Defender had 1 900 s since the morning, on
+four cores of an i5-750. Contention is the likely cause; it was not measured at the time, so it is
+not proven. Nothing to change in the installer for it.
+
+Found on the way, and not ours to fix: Defender on this machine excludes `C:\Windows`,
+`C:\Windows\system32` and all of `C:\ProgramData`, and names among its exclusions files that are
+typical of miners and droppers (`C:\ProgramData\WindowsTask\AMD.exe`, `MicrosoftHost.exe`,
+`C:\ProgramData\ReaItekHD\taskhost.exe`, `C:\WINDOWS\windefender.exe`) and of KMS activators.
+None of them was running and no scheduled task starts them, but the machine should not be taken as
+clean, and what is installed on it (site.env, a core's keys) treated accordingly.
+
 ## 2026-10-23: the wizard, upgrading WiX 0.1.6 to WiX 0.1.6
 
 Four upgrades through the wizard, the stack running each time: the first by hand, the other three
