@@ -125,14 +125,17 @@
          Keycloak's java (Retry / Ignore / Exit) on every upgrade. Immediate, so before the
          transaction: a cancel between here and InstallInitialize leaves the stack stopped until the
          next boot, when the services start by themselves. It runs with the installing user's rights,
-         elevated under the bundle. The services only, inline: Stop-TaVms.ps1 is not on disk yet, and
-         Inno Setup never installed it; TaVmsStop or Inno's uninstaller ends what is left. -->
+         elevated under the bundle. Inline, a short form of Stop-TaVms.ps1, which is not on disk yet
+         and which Inno Setup never installed: the services, then whatever still runs from the
+         installation directory — epmd, which RabbitMQ's stop leaves behind, was the next to be
+         named in the dialog. No script block: Windows Installer reads "{...}" around a [property]
+         as a conditional group of its own. -->
     <CustomAction
       Id="TaVmsStopBeforeValidate"
       Directory="System64Folder"
       Execute="immediate"
       Return="ignore"
-      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -Command &quot;Stop-Service TaVmsHost, TaVms.RabbitMQ, TaVms.Postgres -Force -ErrorAction SilentlyContinue&quot;" />
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -Command &quot;Stop-Service TaVmsHost, TaVms.RabbitMQ, TaVms.Postgres -Force -ErrorAction SilentlyContinue; Get-Process | Where-Object Path -Like '[INSTALLFOLDER]*' | Stop-Process -Force -ErrorAction SilentlyContinue&quot;" />
     <!-- Uninstalled: the services and firewall rules go, the data directory stays. -->
     <CustomAction
       Id="TaVmsRemove"
