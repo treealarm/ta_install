@@ -70,6 +70,10 @@ other change of role takes an uninstall first. An upgrade keeps the role.
   `vmsonvif-actors-hall`, `vmslogger-hall`. Its cameras are added in the core's web interface with
   server `vms-hall`; ONVIF reaches them from the node, their video is published to the core's
   MediaMTX. A node runs no PostgreSQL, RabbitMQ, web or MediaMTX: it uses the core's.
+- **A node's cameras record to a storage on that node.** None is assigned to them by default: add
+  one in the core's web interface with a path on the node's own disk
+  (`C:\ProgramData\TreeAlarm\VMS\media_storage` on Windows, `/data/media_storage` on a Linux node)
+  and assign it to the node's cameras.
 - **App ids are found through HashiCorp Consul**, a server on the core and an agent on each node,
   gossip encrypted with the deployment's key; the agents' HTTP API stays on the loopback.
 - **Sidecars talk over mutual TLS**, with certificates from Dapr Sentry on the core. Sentry signs
