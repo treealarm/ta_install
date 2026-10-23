@@ -62,8 +62,11 @@
                          Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{6C2E9B0E-4B7A-4F51-9E0B-7A1C3D5F2E84}_is1"
                          Value="InstallLocation" Variable="InstallFolder" Bitness="always64" />
     <!-- The data of an earlier installation, uninstalled or not: its site.env names the archive's
-         place, so the theme does not ask again. -->
-    <util:FileSearch Path="[CommonAppDataFolder]TreeAlarm\VMS\config\site.env" Result="exists" Variable="SiteEnvExists" />
+         place, so the theme does not ask again. The search looks for the directory, not the file:
+         it runs unelevated, and config is open to administrators only (passwords), so the file
+         cannot even be seen from here ("access denied", and the Options page came back on an
+         upgrade). Install-TaVms.ps1 creates config and site.env in one step. -->
+    <util:DirectorySearch Path="[CommonAppDataFolder]TreeAlarm\VMS\config" Result="exists" Variable="SiteEnvExists" />
 
     <util:RegistrySearch Root="HKLM" Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" Value="Bld"
                          Variable="VCRedistBld" Bitness="always64" />
