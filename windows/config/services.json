@@ -27,7 +27,11 @@
       "exe": "consul\\consul.exe",
       "args": ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
                "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
-               "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"],
+               "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1",
+               // Raft's default log store, wal, fsyncs its directory, which Windows refuses ("sync
+               // ...\raft\wal: Access is denied"): the server would die on its first start and
+               // whenever it opens or removes a log segment after that.
+               "-hcl=raft_logstore { backend = \"boltdb\" }"],
       // Otherwise it asks checkpoint-api.hashicorp.com for news of a newer version.
       "env": { "CHECKPOINT_DISABLE": "1" },
       "readyPort": "8500"

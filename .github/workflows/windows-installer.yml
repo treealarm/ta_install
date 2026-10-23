@@ -376,8 +376,12 @@ jobs:
           $status = & $hostExe status
           $status
           if ($pending.Count -gt 0) { throw "no 200 within 5 minutes from: $($pending -join ', ')" }
+          # They depend on nothing but the machine, so a restart is a fault that only looks healed
+          # (Consul's wal log store did that: it died twice on Windows, then ran).
           foreach ($name in 'consul-server', 'sentry', 'placement') {
-            if (-not ($status | Select-String "^\s*$name\b")) { throw "the core does not run $name" }
+            $line = $status | Select-String "^\s*$name\b"
+            if (-not $line) { throw "the core does not run $name" }
+            if ($line -notmatch '\brestarts 0\b') { throw "$name restarted: $line" }
           }
           # Every sidecar registered itself with Consul and passes its health check.
           $health = Invoke-RestMethod 'http://127.0.0.1:8500/v1/health/state/any'
