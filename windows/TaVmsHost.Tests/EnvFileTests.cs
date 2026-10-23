@@ -60,4 +60,24 @@ public class EnvFileTests
     var ex = Assert.Throws<FormatException>(() => Parse("OK=1", line));
     Assert.Contains("test.env:2", ex.Message);
   }
+
+  [Fact]
+  public void A_double_quoted_value_may_run_over_several_lines()
+  {
+    var env = Parse(
+      "CORE_ADDRESS=192.168.1.10",
+      "DAPR_TRUST_ANCHORS=\"-----BEGIN CERTIFICATE-----",
+      "MIIBszCCAVmgAwIBAgIU",
+      "-----END CERTIFICATE-----\"",
+      "AFTER=1");
+    Assert.Equal("-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIU\n-----END CERTIFICATE-----", env["DAPR_TRUST_ANCHORS"]);
+    Assert.Equal("1", env["AFTER"]);
+  }
+
+  [Fact]
+  public void A_quote_never_closed_names_its_line()
+  {
+    var error = Assert.Throws<FormatException>(() => Parse("A=1", "PEM=\"-----BEGIN", "abc"));
+    Assert.Contains("test.env:2", error.Message);
+  }
 }

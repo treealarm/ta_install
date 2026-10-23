@@ -2,46 +2,15 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TaVmsHost.Tests;
 
-// Loads the real files this repository ships — ../.env, windows/config/windows.env and
-// services.json — with a site.env like the one the installer writes, so that a variable renamed in
-// one of them without the others fails here rather than on a customer's machine.
+// A standalone installation: one machine, as every installation was before roles. What a core
+// and a node get is in DistributedTests.
 public sealed class StackConfigTests : IDisposable
 {
-  private readonly string _home;
-  private readonly string _data;
+  private readonly Installation _install = new();
 
-  public StackConfigTests()
-  {
-    var repo = FindRepoRoot();
-    _home = Directory.CreateTempSubdirectory("tavms-home").FullName;
-    _data = Directory.CreateTempSubdirectory("tavms-data").FullName;
+  public void Dispose() => _install.Dispose();
 
-    Directory.CreateDirectory(Path.Combine(_home, "config"));
-    File.Copy(Path.Combine(repo, ".env"), Path.Combine(_home, "config", "ta_vms.env"));
-    File.Copy(Path.Combine(repo, "windows", "config", "windows.env"), Path.Combine(_home, "config", "windows.env"));
-    File.Copy(Path.Combine(repo, "windows", "config", "services.json"), Path.Combine(_home, "config", "services.json"));
-
-    Directory.CreateDirectory(Path.Combine(_data, "config"));
-    File.WriteAllLines(Path.Combine(_data, "config", "site.env"),
-    [
-      "POSTGRES_PORT=5433",
-      "POSTGRES_PASSWORD=it's\\a\"secret",
-      "RABBITMQ_PORT=5673",
-      "RABBITMQ_DEFAULT_PASS=p@ss/word",
-      "VMS_MEDIAMTX_PUBLISH_PASS=pub",
-      "VMS_MEDIAMTX_READ_PASS=read",
-      "KEYCLOAK_ADMIN_PASSWORD=kc-admin",
-      @"VMS_STORAGE_BASE_PATH=D:\Archive",
-    ]);
-  }
-
-  public void Dispose()
-  {
-    Directory.Delete(_home, true);
-    Directory.Delete(_data, true);
-  }
-
-  private StackConfig Load() => StackConfig.Load(_home, _data);
+  private StackConfig Load() => _install.Load();
 
   [Fact]
   public void Site_env_overrides_windows_env_which_overrides_the_shared_env()
@@ -50,7 +19,7 @@ public sealed class StackConfigTests : IDisposable
     Assert.Equal("127.0.0.1", config.Env["POSTGRES_HOST"]);          // windows.env over .env
     Assert.Equal("5433", config.Env["POSTGRES_PORT"]);                // site.env over .env
     Assert.Equal(@"D:\Archive", config.Env["VMS_STORAGE_BASE_PATH"]); // site.env over windows.env
-    Assert.Equal(_data + @"\logs", config.Env["VMS_LOG_PATH"]);       // ${TAVMS_DATA} expanded
+    Assert.Equal(_install.Data + @"\logs", config.Env["VMS_LOG_PATH"]);       // ${TAVMS_DATA} expanded
     Assert.Equal("vms:vmsfs:vmsonvif:vmslogger", config.Env["MEDIA_SERVER_PAIRS"]);
   }
 
@@ -187,13 +156,56 @@ public sealed class StackConfigTests : IDisposable
   }
 
   [Fact]
-  public void Name_resolution_is_validated()
+  public void Standalone_runs_neither_consul_nor_sentry_nor_tls()
   {
-    File.AppendAllLines(Path.Combine(_data, "config", "site.env"), ["TAVMS_DAPR_NAME_RESOLUTION=mdns"]);
-    Assert.Contains("component: \"mdns\"", DaprComponents.Configuration(Load()));
+    var config = Load();
+    Assert.Equal(Role.Standalone, config.Role);
+    Assert.Equal(["placement", "mediamtx", "keycloak", "mt_admin"], config.Manifest.Infrastructure.Select(i => i.Name));
+    Assert.Equal("127.0.0.1", config.Infra(config.Manifest.Infrastructure[0]).Args[3]);
+    foreach (var app in config.Manifest.Apps)
+    {
+      var sidecar = config.Sidecar(app);
+      Assert.DoesNotContain("--enable-mtls", sidecar.Args);
+      Assert.Equal(config.DaprConfigPath, sidecar.Args[sidecar.Args.ToList().IndexOf("--config") + 1]);
+      Assert.Equal(["DAPR_HOST_IP"], sidecar.Env.Keys);
+    }
+  }
 
-    File.AppendAllLines(Path.Combine(_data, "config", "site.env"), ["TAVMS_DAPR_NAME_RESOLUTION=consul"]);
-    Assert.Throws<InvalidOperationException>(() => DaprComponents.Configuration(Load()));
+  [Fact]
+  public void Standalone_keeps_the_app_ids_and_server_id_it_always_had()
+  {
+    var config = Load();
+    Assert.Equal(
+      ["vmscfg", "vmsutils", "vmslogger", "vmsfs", "vmssingleton", "vmsonvif", "vmsonvif-actors",
+       "vmsanalyticssingleton", "vmsptztrackingsingleton", "vms", "web-vms"],
+      config.Manifest.Apps.Select(a => a.AppId));
+    Assert.Equal("vms", config.App(config.Manifest.Apps.Single(a => a.AppId == "vmsonvif-actors")).Env["OWN_SERVER_ID"]);
+  }
+
+  [Fact]
+  public void The_resolver_setting_of_old_is_refused_rather_than_ignored()
+  {
+    _install.AppendSite("TAVMS_DAPR_NAME_RESOLUTION=sqlite");
+    var error = Assert.Throws<InvalidOperationException>(Load);
+    Assert.Contains("TAVMS_ROLE", error.Message);
+  }
+
+  [Theory]
+  [InlineData("TAVMS_ROLE=primary")]
+  [InlineData("TAVMS_ROLE=node", "TAVMS_NODE_NAME=Hall")]
+  [InlineData("TAVMS_ROLE=node", "TAVMS_NODE_NAME=core")]
+  public void A_role_is_validated(params string[] lines)
+  {
+    _install.AppendSite(lines);
+    Assert.Throws<InvalidOperationException>(Load);
+  }
+
+  [Fact]
+  public void A_core_without_its_distributed_files_says_what_to_run()
+  {
+    _install.AppendSite("TAVMS_ROLE=core", "DAPR_HOST_IP=192.168.1.10");
+    var error = Assert.Throws<InvalidOperationException>(Load);
+    Assert.Contains("TaVmsHost core", error.Message);
   }
 
   [Fact]
@@ -201,14 +213,5 @@ public sealed class StackConfigTests : IDisposable
   {
     var names = Infrastructure.DatabaseNames(Load().Env, NullLogger.Instance).Select(n => n.Name).ToList();
     Assert.Equal(["ta_analytics", "ta_cfg", "ta_fs", "ta_keycloak", "ta_state"], names);
-  }
-
-  private static string FindRepoRoot()
-  {
-    for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-    {
-      if (File.Exists(Path.Combine(dir.FullName, "windows", "config", "services.json"))) return dir.FullName;
-    }
-    throw new DirectoryNotFoundException("ta_install checkout not found above the test binaries");
   }
 }

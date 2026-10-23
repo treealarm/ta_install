@@ -21,7 +21,13 @@ internal static class DaprComponents
     Directory.CreateDirectory(config.ComponentsDir);
     File.WriteAllText(Path.Combine(config.ComponentsDir, "statestore.yaml"), StateStore(config));
     File.WriteAllText(Path.Combine(config.ComponentsDir, "orderpubsub.yaml"), PubSub(config));
-    File.WriteAllText(config.DaprConfigPath, Configuration(config));
+    if (config.Role == Role.Standalone)
+    {
+      File.WriteAllText(config.DaprConfigPath, Configuration(config));
+      return;
+    }
+    foreach (var app in config.Manifest.Apps)
+      File.WriteAllText(config.SidecarConfigPath(app.AppId), SidecarConfiguration(app));
   }
 
   private const string Header =
@@ -85,38 +91,48 @@ internal static class DaprComponents
       """;
   }
 
-  // sqlite, Dapr's resolver for every sidecar on one host, is what windows.env sets: it keeps
-  // calls between services on the loopback. mDNS, what Docker uses, announces the LAN address and
-  // stays selectable for a deployment that spans machines. Required, so the choice is always visible.
-  internal static string Configuration(StackConfig c)
-  {
-    var resolver = c.Require("TAVMS_DAPR_NAME_RESOLUTION");
-    var nameResolution = resolver switch
-    {
-      "mdns" => """
-          nameResolution:
-            component: "mdns"
-        """,
-      "sqlite" => $"""
-          nameResolution:
-            component: "sqlite"
-            version: "v1"
-            configuration:
-              connectionString: {YamlString(Path.Combine(c.Data, "dapr", "nameresolution.db"))}
-        """,
-      _ => throw new InvalidOperationException(
-        $"TAVMS_DAPR_NAME_RESOLUTION='{resolver}': expected 'mdns' or 'sqlite'"),
-    };
-    return Header + $"""
-      apiVersion: dapr.io/v1alpha1
-      kind: Configuration
-      metadata:
-        name: tavms
-      spec:
-      {nameResolution}
+  // One machine: sqlite, Dapr's resolver for every sidecar on one host, which keeps calls between
+  // services on the loopback (mDNS would announce the LAN address, and lose every call when the
+  // cable is pulled or the DHCP lease moves the machine).
+  internal static string Configuration(StackConfig c) => Header + $"""
+    apiVersion: dapr.io/v1alpha1
+    kind: Configuration
+    metadata:
+      name: tavms
+    spec:
+      nameResolution:
+        component: "sqlite"
+        version: "v1"
+        configuration:
+          connectionString: {YamlString(Path.Combine(c.Data, "dapr", "nameresolution.db"))}
 
-      """;
-  }
+    """;
+
+  // Several machines: Consul, as scripts/distributed.sh writes it for Linux. The sidecar registers
+  // itself with this machine's agent, at DAPR_HOST_IP, and is found only while healthy. The health
+  // check is its own: Consul's default would call the sidecar's HTTP API at its LAN address, and
+  // that API stays on the loopback.
+  internal static string SidecarConfiguration(DaprApp app) => Header + $"""
+    apiVersion: dapr.io/v1alpha1
+    kind: Configuration
+    metadata:
+      name: {app.AppId}
+    spec:
+      nameResolution:
+        component: "consul"
+        configuration:
+          client:
+            address: "127.0.0.1:8500"
+          selfRegister: true
+          selfDeregister: true
+          useCache: true
+          checks:
+            - name: "Dapr Health Status"
+              checkID: "daprHealth:{app.AppId}"
+              interval: "5s"
+              http: "http://127.0.0.1:{app.DaprHttpPort}/v1.0/healthz"
+
+    """;
 
   // libpq keyword/value syntax: single-quoted, with backslash escaping ' and \.
   private static string PgValue(string value) =>

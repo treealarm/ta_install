@@ -1,19 +1,64 @@
 // What TaVmsHost runs, in start order; it stops them in reverse. The Windows counterpart of
-// ../docker-compose.yml: paths are relative to the installation directory, ${NAME} comes from the
-// merged environment (ta_vms.env < windows.env < site.env).
+// ../docker-compose.yml (standalone) and ../docker-compose.distributed.yml (core, node): paths are
+// relative to the installation directory, ${NAME} comes from the merged environment (StackConfig).
+//
+// "roles" names the machines an entry runs on (TAVMS_ROLE; none: all of them). A node runs only the
+// services next to its cameras, under app ids that carry its name: ${TAVMS_NODE_SUFFIX} is
+// "-<TAVMS_NODE_NAME>" there and empty elsewhere. This file is the one place a machine's app ids
+// are fixed; a core mints a node's tokens from the node entries here.
 //
 // Sidecar ports are per app because every sidecar shares one localhost here, unlike in Docker where
 // each sits in its app's network namespace on 3500/50001. They follow the F5 setup in ta_vms
 // (ta_vms/dotnet/dapr.yaml), except the gRPC ones: 41001.. here rather than 51001.., because every
 // fixed port must stay below 49152 on Windows (see windows.env). The app learns its own through
-// DAPR_GRPC_PORT/DAPR_HTTP_PORT.
+// DAPR_GRPC_PORT/DAPR_HTTP_PORT. docker-compose.distributed.yml uses the same numbers.
 //
 // Not here: roitrc and the analytics worker (no Windows build), VmsSquareSingleton (no Square
 // integration on Windows; see windows.env).
 {
   "infrastructure": [
+    // --- several machines: how they find each other and trust each other -------------------------
+    {
+      // Resolves app ids for every machine of the deployment; the nodes' agents join it. Its HTTP
+      // API, which sidecars register through, stays on the loopback; DNS and gRPC are off. The
+      // sidecars start only after it answers: daprd with the Consul resolver exits otherwise.
+      "name": "consul-server",
+      "roles": ["core"],
+      "exe": "consul\\consul.exe",
+      "args": ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
+               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
+               "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"],
+      // Otherwise it asks checkpoint-api.hashicorp.com for news of a newer version.
+      "env": { "CHECKPOINT_DISABLE": "1" },
+      "readyPort": "8500"
+    },
+    {
+      "name": "consul-agent",
+      "roles": ["node"],
+      "exe": "consul\\consul.exe",
+      "args": ["agent", "-ui=false", "-datacenter=tavms", "-node=${TAVMS_NODE_NAME}",
+               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}", "-retry-join=${CORE_ADDRESS}",
+               "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"],
+      "env": { "CHECKPOINT_DISABLE": "1" },
+      "readyPort": "8500"
+    },
+    {
+      // Dapr's certificate authority: signs a sidecar's certificate against the token for its app
+      // id (distributed\sentry\config.yaml, written by TaVmsHost core with the root and issuer).
+      "name": "sentry",
+      "roles": ["core"],
+      "exe": "dapr\\sentry.exe",
+      "args": ["--config", "${TAVMS_DATA}\\distributed\\sentry\\config.yaml",
+               "--issuer-credentials", "${TAVMS_DATA}\\distributed\\sentry", "--trust-domain", "localhost",
+               "--port", "${DAPR_SENTRY_PORT}", "--listen-address", "${DAPR_HOST_IP}",
+               "--healthz-port", "6061", "--metrics-port", "9209"],
+      "readyPort": "${DAPR_SENTRY_PORT}",
+      "readyAddress": "${DAPR_HOST_IP}"
+    },
+    // --- this machine -----------------------------------------------------------------------------
     {
       "name": "placement",
+      "roles": ["standalone"],
       "exe": "dapr\\placement.exe",
       // Loopback only: every sidecar is on this machine. Health and metrics moved off their
       // defaults (8080, 9090), the two ports most likely to be taken on a customer's machine.
@@ -22,29 +67,47 @@
       "readyPort": "${DAPR_PLACEMENT_PORT}"
     },
     {
+      // The core's: every machine's actor sidecars connect to it, over TLS with Sentry's certificate.
+      "name": "placement",
+      "roles": ["core"],
+      "exe": "dapr\\placement.exe",
+      "args": ["--port", "${DAPR_PLACEMENT_PORT}", "--listen-address", "${DAPR_HOST_IP}",
+               "--healthz-port", "6051", "--healthz-listen-address", "127.0.0.1", "--metrics-port", "9208",
+               "--tls-enabled", "--trust-anchors-file", "${TAVMS_DATA}\\distributed\\sentry\\ca.crt",
+               "--sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}"],
+      "env": { "DAPR_SENTRY_TOKEN_FILE": "${TAVMS_DATA}\\distributed\\tokens\\dapr-placement.token" },
+      "readyPort": "${DAPR_PLACEMENT_PORT}",
+      "readyAddress": "${DAPR_HOST_IP}"
+    },
+    {
       "name": "mediamtx",
+      "roles": ["standalone", "core"],
       "exe": "mediamtx\\mediamtx.exe",
       "args": ["${TAVMS_HOME}\\mediamtx\\mediamtx.yml"],
       "env": {
-        // The same yml as Docker. Passwords as in ta_install's compose; the rest keeps on the
-        // loopback what only processes on this machine use (Control API, WHEP behind web_srv) and
-        // turns off what nothing uses at all, so that MediaMTX cannot fail to start because some
-        // other program on the machine already holds 1935, 8888 or 8890.
+        // The same yml as Docker. Passwords as in ta_install's compose; the rest keeps the Control
+        // API and WHEP (behind web_srv), which only processes on this machine use, on DAPR_HOST_IP
+        // — the loopback on one machine; on a core the address VmsCfg's MediaMTX row names
+        // (VMS_MTX_HOST), since nodes publish to the same server — and turns off what nothing
+        // uses at all, so that MediaMTX cannot fail to start because some other program on the
+        // machine already holds 1935, 8888 or 8890.
         "MTX_AUTHINTERNALUSERS_0_PASS": "${VMS_MEDIAMTX_PUBLISH_PASS}",
         "MTX_AUTHINTERNALUSERS_1_PASS": "${VMS_MEDIAMTX_READ_PASS}",
-        "MTX_APIADDRESS": "127.0.0.1:9997",
-        "MTX_WEBRTCADDRESS": "127.0.0.1:8889",
+        "MTX_APIADDRESS": "${DAPR_HOST_IP}:9997",
+        "MTX_WEBRTCADDRESS": "${DAPR_HOST_IP}:8889",
         "MTX_RTMP": "no",
         "MTX_HLS": "no",
         "MTX_SRT": "no"
       },
-      "readyPort": "9997"
+      "readyPort": "9997",
+      "readyAddress": "${DAPR_HOST_IP}"
     },
     {
       // Users and login. Built for PostgreSQL when the installer was made (Build-Stage.ps1 runs
       // `kc build`), so it starts --optimized; the realm is imported from keycloak\data\import on
       // the first start and left alone afterwards. Only web-vms talks to it, on the loopback.
       "name": "keycloak",
+      "roles": ["standalone", "core"],
       "exe": "keycloak\\bin\\kc.bat",
       "args": ["start", "--optimized", "--import-realm"],
       "env": {
@@ -74,6 +137,7 @@
       // User administration: multitenant_admin in its standalone mode, for this realm's
       // administrators. Reachable from the LAN (a firewall rule), behind its own login.
       "name": "mt_admin",
+      "roles": ["standalone", "core"],
       "exe": "mt_admin\\mt_admin.Server.exe",
       "env": {
         "MT_ADMIN_REALM": "${KEYCLOAK_REALM_NAME}",
@@ -87,29 +151,31 @@
     }
   ],
   "apps": [
-    { "appId": "vmscfg", "exe": "dotnet\\VmsCfg\\VmsCfg.exe", "protocol": "grpc", "appPort": "${CFG_VMS_PORT}",
+    // System-wide: on the core (or the one machine) only.
+    { "appId": "vmscfg", "roles": ["standalone", "core"], "exe": "dotnet\\VmsCfg\\VmsCfg.exe", "protocol": "grpc", "appPort": "${CFG_VMS_PORT}",
       "daprHttpPort": 3601, "daprGrpcPort": 41002, "daprInternalGrpcPort": 19012, "metricsPort": 9191, "placement": false },
-    { "appId": "vmsutils", "exe": "dotnet\\VmsUtils\\VmsUtils.exe", "protocol": "grpc", "appPort": "${UTILS_VMS_PORT}",
+    { "appId": "vmsutils", "roles": ["standalone", "core"], "exe": "dotnet\\VmsUtils\\VmsUtils.exe", "protocol": "grpc", "appPort": "${UTILS_VMS_PORT}",
       "daprHttpPort": 3606, "daprGrpcPort": 41007, "daprInternalGrpcPort": 19017, "metricsPort": 9196, "placement": false },
-    { "appId": "vmslogger", "exe": "dotnet\\VmsLogger\\VmsLogger.exe", "protocol": "grpc", "appPort": "${LOGGER_VMS_PORT}",
+    // A node's own, and the core's as a node with the standalone app ids.
+    { "appId": "vmslogger${TAVMS_NODE_SUFFIX}", "exe": "dotnet\\VmsLogger\\VmsLogger.exe", "protocol": "grpc", "appPort": "${LOGGER_VMS_PORT}",
       "daprHttpPort": 3605, "daprGrpcPort": 41006, "daprInternalGrpcPort": 19016, "metricsPort": 9195, "placement": false },
-    { "appId": "vmsfs", "exe": "dotnet\\VmsFs\\VmsFs.exe", "protocol": "grpc", "appPort": "${FS_VMS_PORT}",
+    { "appId": "vmsfs${TAVMS_NODE_SUFFIX}", "exe": "dotnet\\VmsFs\\VmsFs.exe", "protocol": "grpc", "appPort": "${FS_VMS_PORT}",
       "daprHttpPort": 3604, "daprGrpcPort": 41005, "daprInternalGrpcPort": 19015, "metricsPort": 9194, "placement": false },
-    { "appId": "vmssingleton", "exe": "dotnet\\VmsSingleton\\VmsSingleton.exe", "protocol": "grpc", "appPort": "${SINGLETON_VMS_PORT}",
+    { "appId": "vmssingleton", "roles": ["standalone", "core"], "exe": "dotnet\\VmsSingleton\\VmsSingleton.exe", "protocol": "grpc", "appPort": "${SINGLETON_VMS_PORT}",
       "daprHttpPort": 3613, "daprGrpcPort": 41014, "daprInternalGrpcPort": 19024, "metricsPort": 9203, "placement": true },
-    { "appId": "vmsonvif", "exe": "dotnet\\VmsOnvif\\VmsOnvif.exe", "protocol": "grpc", "appPort": "${ONVIF_SRV_PORT}",
+    { "appId": "vmsonvif${TAVMS_NODE_SUFFIX}", "exe": "dotnet\\VmsOnvif\\VmsOnvif.exe", "protocol": "grpc", "appPort": "${ONVIF_SRV_PORT}",
       "daprHttpPort": 3602, "daprGrpcPort": 41003, "daprInternalGrpcPort": 19013, "metricsPort": 9192, "placement": true,
-      "env": { "OWN_SERVER_ID": "vms" } },
-    { "appId": "vmsonvif-actors", "exe": "dotnet\\VmsOnvifActors\\VmsOnvifActors.exe", "protocol": "http", "appPort": "${ONVIF_ACTORS_PORT}",
+      "env": { "OWN_SERVER_ID": "vms${TAVMS_NODE_SUFFIX}" } },
+    { "appId": "vmsonvif-actors${TAVMS_NODE_SUFFIX}", "exe": "dotnet\\VmsOnvifActors\\VmsOnvifActors.exe", "protocol": "http", "appPort": "${ONVIF_ACTORS_PORT}",
       "daprHttpPort": 3603, "daprGrpcPort": 41004, "daprInternalGrpcPort": 19014, "metricsPort": 9193, "placement": true,
-      "env": { "OWN_SERVER_ID": "vms" } },
-    { "appId": "vmsanalyticssingleton", "exe": "dotnet\\VmsAnalyticsSingleton\\VmsAnalyticsSingleton.exe", "protocol": "grpc", "appPort": "${ANALYTICS_VMS_PORT}",
+      "env": { "OWN_SERVER_ID": "vms${TAVMS_NODE_SUFFIX}" } },
+    { "appId": "vmsanalyticssingleton", "roles": ["standalone", "core"], "exe": "dotnet\\VmsAnalyticsSingleton\\VmsAnalyticsSingleton.exe", "protocol": "grpc", "appPort": "${ANALYTICS_VMS_PORT}",
       "daprHttpPort": 3610, "daprGrpcPort": 41011, "daprInternalGrpcPort": 19021, "metricsPort": 9200, "placement": false },
-    { "appId": "vmsptztrackingsingleton", "exe": "dotnet\\VmsPtzTrackingSingleton\\VmsPtzTrackingSingleton.exe", "protocol": "grpc", "appPort": "${PTZ_TRACKING_VMS_PORT}",
+    { "appId": "vmsptztrackingsingleton", "roles": ["standalone", "core"], "exe": "dotnet\\VmsPtzTrackingSingleton\\VmsPtzTrackingSingleton.exe", "protocol": "grpc", "appPort": "${PTZ_TRACKING_VMS_PORT}",
       "daprHttpPort": 3616, "daprGrpcPort": 41017, "daprInternalGrpcPort": 19027, "metricsPort": 9206, "placement": true },
-    { "appId": "vms", "exe": "vms\\vms.exe", "protocol": "grpc", "appPort": "${GRPC_VMS_PORT}",
+    { "appId": "vms${TAVMS_NODE_SUFFIX}", "exe": "vms\\vms.exe", "protocol": "grpc", "appPort": "${GRPC_VMS_PORT}",
       "daprHttpPort": 3607, "daprGrpcPort": 41008, "daprInternalGrpcPort": 19018, "metricsPort": 9197, "placement": false },
-    { "appId": "web-vms", "exe": "dotnet\\web_srv.Server\\web_srv.Server.exe", "protocol": "http", "appPort": "${WEB_VMS_PORT}",
+    { "appId": "web-vms", "roles": ["standalone", "core"], "exe": "dotnet\\web_srv.Server\\web_srv.Server.exe", "protocol": "http", "appPort": "${WEB_VMS_PORT}",
       "daprHttpPort": 3600, "daprGrpcPort": 41001, "daprInternalGrpcPort": 19011, "metricsPort": 9190, "placement": false }
   ]
 }

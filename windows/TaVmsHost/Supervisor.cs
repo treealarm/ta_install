@@ -35,8 +35,10 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
       Directory.CreateDirectory(config.HostLogDir);
       DaprComponents.Write(config);
 
+      // A node's databases and broker are the core's: it waits for them, and creates nothing there.
       await Infrastructure.WaitForPostgresAsync(config, log, stoppingToken);
-      await Infrastructure.EnsureDatabasesAsync(config, checkOnly: false, log, stoppingToken);
+      if (config.Role != Role.Node)
+        await Infrastructure.EnsureDatabasesAsync(config, checkOnly: false, log, stoppingToken);
       await Infrastructure.WaitForRabbitMqAsync(config, log, stoppingToken);
 
       foreach (var spec in config.Manifest.Infrastructure)
@@ -44,7 +46,7 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
         var process = Add(_infra, config.Infra(spec));
         process.Start();
         if (config.ReadyPort(spec) is int port)
-          await WaitForPortAsync(spec.Name, port, InfraReadyTimeout, stoppingToken);
+          await WaitForPortAsync(spec.Name, config.ReadyAddress(spec), port, InfraReadyTimeout, stoppingToken);
       }
 
       foreach (var app in config.Manifest.Apps)
@@ -105,7 +107,7 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
   // Not readiness of the app — nothing generic says that — only that the next one in line has
   // something to talk to. Past the timeout the next process is started anyway: the supervisor keeps
   // restarting whatever failed, and holding the rest of the stack back would not help it.
-  private async Task WaitForPortAsync(string name, int port, TimeSpan timeout, CancellationToken ct)
+  private async Task WaitForPortAsync(string name, string address, int port, TimeSpan timeout, CancellationToken ct)
   {
     var deadline = DateTime.UtcNow + timeout;
     while (DateTime.UtcNow < deadline)
@@ -113,7 +115,7 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
       try
       {
         using var client = new TcpClient();
-        await client.ConnectAsync("127.0.0.1", port, ct);
+        await client.ConnectAsync(address, port, ct);
         return;
       }
       catch (SocketException)
@@ -121,7 +123,8 @@ internal sealed class Supervisor(StackConfig config, ILogger<Supervisor> log) : 
         await Task.Delay(500, ct);
       }
     }
-    log.LogWarning("{Name} is not listening on {Port} after {Timeout:0}s; going on", name, port, timeout.TotalSeconds);
+    log.LogWarning("{Name} is not listening on {Address}:{Port} after {Timeout:0}s; going on",
+      name, address, port, timeout.TotalSeconds);
   }
 
   // /v1.0/healthz/outbound turns 204 once the sidecar has loaded its components and can serve the

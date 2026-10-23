@@ -9,6 +9,9 @@
 //   TaVmsHost check-db [--data <dir>]  report the databases POSTGRES_*_DB names; creates nothing
 //   TaVmsHost env <KEY> [--data <dir>] print one value of the merged environment (for the
 //                                      installer scripts, so that only one parser reads env files)
+//   TaVmsHost core <address>           make this machine the core of a deployment over several
+//   TaVmsHost package <node>           machines, make a node's package on the core, join a node
+//   TaVmsHost join <package> <address> with it (Distributed.cs; the installer runs core and join)
 //
 // The installation lives in the directory above this executable (<home>\host\TaVmsHost.exe); its
 // data in --data, %ProgramData%\TreeAlarm\VMS unless told otherwise.
@@ -42,12 +45,18 @@ switch (positional)
     return await CheckDatabasesAsync(home, data);
   case ["env", var key]:
     return PrintEnv(home, data, key);
+  case ["core", var address]:
+    return RunDistributed(home, data, c => Distributed.Core(c, RequireLocal(address), Console.Out));
+  case ["package", var node]:
+    return RunDistributed(home, data, c => Distributed.Package(c, node, Console.Out));
+  case ["join", var package, var address]:
+    return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), Console.Out));
   case ["send-ctrl-c", var pid] when OperatingSystem.IsWindows():
     // Internal: see Native.SendCtrlC.
     Native.SendCtrlC(int.Parse(pid, System.Globalization.CultureInfo.InvariantCulture));
     return 0;
   default:
-    Console.Error.WriteLine("usage: TaVmsHost [run] [--data <dir>] | status | restart <name> | check-db [--data <dir>] | env <KEY> [--data <dir>]");
+    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | package <node> | join <package> <address>   [--data <dir>]");
     return 2;
 }
 
@@ -130,6 +139,11 @@ static async Task<int> CheckDatabasesAsync(string home, string data)
   try
   {
     var config = StackConfig.Load(home, data);
+    if (config.Role == Role.Node)
+    {
+      Log.Error("This machine is a node: its databases live on the core, run check-db there");
+      return 1;
+    }
     var log = new SerilogLoggerFactory(Log.Logger).CreateLogger("check-db");
     var missing = await Infrastructure.EnsureDatabasesAsync(config, checkOnly: true, log, CancellationToken.None);
     return missing == 0 ? 0 : 1;
@@ -157,4 +171,31 @@ static int PrintEnv(string home, string data, string key)
     Console.Error.WriteLine(ex.Message);
     return 1;
   }
+}
+
+static int RunDistributed(string home, string data, Action<StackConfig> command)
+{
+  try
+  {
+    command(StackConfig.Load(home, data));
+    return 0;
+  }
+  catch (Exception ex)
+  {
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+  }
+}
+
+// The address other machines will reach this one at, and that its sidecars and Consul bind to:
+// it has to be one of this machine's own. With a VPN, Hyper-V or Radmin there are several, so the
+// machine cannot pick it.
+static string RequireLocal(string address)
+{
+  var own = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+    .SelectMany(i => i.GetIPProperties().UnicastAddresses)
+    .Select(a => a.Address.ToString());
+  return own.Contains(address)
+    ? address
+    : throw new ArgumentException($"{address} is not an address of this machine");
 }
