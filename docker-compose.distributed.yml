@@ -1,0 +1,490 @@
+# A deployment over several machines: the core (profile "core") and nodes (profile "node"). Run it
+# through scripts/distributed.sh, which writes data/distributed/ first and passes the right env files
+# and profile; docker-compose.yml stays the single-machine deployment.
+#
+# Every container runs in the host's network, as TaVmsHost runs every process on one localhost on
+# Windows: each sidecar has ports of its own (the same numbers as windows/config/services.json),
+# its API and metrics on the loopback and its internal port on DAPR_HOST_IP, the address other
+# machines reach it at. Apps listen on the loopback and are reached by their own sidecar only.
+#
+# The core runs everything docker-compose.yml runs, apart from what has no place in a distributed
+# deployment yet (the Square integration, the analytics worker and roitrc), and is a node too, with
+# the standalone app ids (vms, vmsfs, ...). A node runs its own vms/vmsfs/vmsonvif/vmsonvif-actors/
+# vmslogger as <app>-<node name>; its video goes to the core's MediaMTX.
+
+x-app: &app
+  network_mode: host
+  restart: unless-stopped
+  env_file:
+    - .env
+    - data/distributed/distributed.env
+  volumes:
+    - ./data:/data
+
+x-sidecar: &sidecar
+  image: daprio/daprd:latest
+  network_mode: host
+  restart: unless-stopped
+  user: "${TAVMS_UID}:${TAVMS_GID}"
+  volumes:
+    - ./data/distributed:/dist:ro
+
+# The flags every sidecar shares. A sidecar's command is its own part followed by these.
+x-sidecar-flags: &sidecar-flags
+  DAPR_HOST_IP: "${DAPR_HOST_IP}"
+  DAPR_TRUST_ANCHORS: "${DAPR_TRUST_ANCHORS}"
+
+x-core: &core
+  profiles: [core]
+
+x-node: &node
+  profiles: [node]
+
+services:
+  # --- the core's infrastructure ------------------------------------------------------------------
+
+  # Resolves app ids for every machine. The other machines' agents join it; the HTTP API that
+  # sidecars register through stays on the loopback, and DNS and gRPC are off.
+  consul-server:
+    <<: *core
+    image: hashicorp/consul:latest
+    network_mode: host
+    restart: unless-stopped
+    command: ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
+              "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
+              "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"]
+    volumes:
+      - ./data/consul:/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      retries: 12
+
+  # Dapr's certificate authority: signs a sidecar's certificate against the token for its app id
+  # (data/distributed/sentry/config.yaml). Its root and issuer come from distributed.sh.
+  dapr-sentry:
+    <<: *core
+    image: daprio/sentry:latest
+    network_mode: host
+    restart: unless-stopped
+    user: "${TAVMS_UID}:${TAVMS_GID}"
+    command: ["./sentry", "--config", "/dist/sentry/config.yaml", "--issuer-credentials", "/dist/sentry",
+              "--trust-domain", "localhost", "--port", "${DAPR_SENTRY_PORT}", "--listen-address", "${DAPR_HOST_IP}",
+              "--healthz-port", "6061", "--metrics-port", "9209"]
+    volumes:
+      - ./data/distributed:/dist:ro
+
+  dapr-placement:
+    <<: *core
+    image: daprio/dapr:latest
+    network_mode: host
+    restart: unless-stopped
+    user: "${TAVMS_UID}:${TAVMS_GID}"
+    command: ["./placement", "--port", "${DAPR_PLACEMENT_PORT}", "--listen-address", "${DAPR_HOST_IP}",
+              "--healthz-port", "6051", "--metrics-port", "9208",
+              "--tls-enabled", "--trust-anchors-file", "/dist/sentry/ca.crt",
+              "--sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}"]
+    environment:
+      DAPR_SENTRY_TOKEN_FILE: /dist/core/placement.token
+    volumes:
+      - ./data/distributed:/dist:ro
+    depends_on:
+      - dapr-sentry
+
+  # Reached by every node's state store and VmsFs: listens on every address, behind the password
+  # distributed.sh insists on.
+  postgres:
+    <<: *core
+    image: postgres:latest
+    network_mode: host
+    restart: unless-stopped
+    command: ["postgres", "-p", "${POSTGRES_PORT}"]
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_CFG_DB}"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+
+  db-init:
+    <<: *core
+    image: postgres:latest
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: 127.0.0.1
+    volumes:
+      - ./scripts:/init:ro
+      - ./data/distributed/components:/components:ro
+    entrypoint: ["bash", "/init/prepare-databases.sh"]
+    working_dir: /init
+    restart: "no"
+    depends_on:
+      - postgres
+
+  # Every machine's pub/sub component connects here, on RABBITMQ_PORT. The management UI stays on
+  # the loopback; Erlang distribution takes AMQP's port plus 20000, as RabbitMQ does by default
+  # when given the port through RABBITMQ_NODE_PORT.
+  rabbitmq:
+    <<: *core
+    image: rabbitmq:management
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS}"
+      RABBITMQ_NODE_PORT: "${RABBITMQ_PORT}"
+    configs:
+      - source: rabbitmq-listeners
+        target: /etc/rabbitmq/conf.d/90-tavms.conf
+    volumes:
+      - ./data/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  keycloak:
+    <<: *core
+    image: quay.io/keycloak/keycloak:latest
+    network_mode: host
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://127.0.0.1:${POSTGRES_PORT}/${POSTGRES_KEYCLOAK_DB}"
+      KC_DB_USERNAME: "${POSTGRES_USER}"
+      KC_DB_PASSWORD: "${POSTGRES_PASSWORD}"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_HOST: 127.0.0.1
+      KC_HTTP_PORT: "${KEYCLOAK_PORT}"
+      KC_HOSTNAME_STRICT: "false"
+      KC_CACHE: local
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN_USER}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD}"
+      KEYCLOAK_REALM_NAME: "${KEYCLOAK_REALM_NAME}"
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID}"
+      JAVA_OPTS_KC_HEAP: "-Xms64m -Xmx512m"
+    volumes:
+      - ./init_files/keycloak:/opt/keycloak/data/import:ro
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+  mt_admin:
+    <<: [*core, *app]
+    image: treealarm/mt_admin:latest
+    environment:
+      MT_ADMIN_REALM: "${KEYCLOAK_REALM_NAME}"
+      HTTP_ADMIN_PORT: "${MT_ADMIN_PORT}"
+      ASPNETCORE_ENVIRONMENT: Production
+    depends_on:
+      - keycloak
+
+  # One MediaMTX for the deployment for now, on the core: the nodes publish their cameras to it, and
+  # web_vms serves them from it. Its Control API and WHEP listener are on the core's address, where
+  # the MediaMTX row VmsCfg seeds from VMS_MTX_HOST points every service, behind vms_read's password.
+  mediamtx:
+    <<: *core
+    image: bluenviron/mediamtx:latest
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      MTX_AUTHINTERNALUSERS_0_PASS: "${VMS_MEDIAMTX_PUBLISH_PASS}"
+      MTX_AUTHINTERNALUSERS_1_PASS: "${VMS_MEDIAMTX_READ_PASS}"
+      MTX_APIADDRESS: "${DAPR_HOST_IP}:9997"
+      MTX_WEBRTCADDRESS: "${DAPR_HOST_IP}:8889"
+      MTX_METRICS: "no"
+      MTX_PPROF: "no"
+      MTX_PLAYBACK: "no"
+      MTX_RTMP: "no"
+      MTX_HLS: "no"
+      MTX_SRT: "no"
+    volumes:
+      - ./init_files/config/mediamtx.yml:/mediamtx.yml
+
+  # --- the core's services ------------------------------------------------------------------------
+
+  vmscfg:
+    <<: [*core, *app]
+    image: treealarm/vmscfg:latest
+    environment: { APP_ID: vmscfg, DAPR_HTTP_PORT: "3601", DAPR_GRPC_PORT: "41002" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmscfg-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmscfg.token }
+    command: ["./daprd", "-app-id", "vmscfg", "-app-port", "${CFG_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3601", "-dapr-grpc-port", "41002", "-dapr-internal-grpc-port", "19012", "-metrics-port", "9191",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmscfg.yaml"]
+    depends_on: [vmscfg, consul-server, dapr-sentry]
+
+  vmsutils:
+    <<: [*core, *app]
+    image: treealarm/vmsutils:latest
+    environment: { APP_ID: vmsutils, DAPR_HTTP_PORT: "3606", DAPR_GRPC_PORT: "41007" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmsutils-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsutils.token }
+    command: ["./daprd", "-app-id", "vmsutils", "-app-port", "${UTILS_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3606", "-dapr-grpc-port", "41007", "-dapr-internal-grpc-port", "19017", "-metrics-port", "9196",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsutils.yaml"]
+    depends_on: [vmsutils, consul-server, dapr-sentry]
+
+  vmssingleton:
+    <<: [*core, *app]
+    image: treealarm/vmssingleton:latest
+    environment: { APP_ID: vmssingleton, DAPR_HTTP_PORT: "3613", DAPR_GRPC_PORT: "41014" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmssingleton-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmssingleton.token }
+    command: ["./daprd", "-app-id", "vmssingleton", "-app-port", "${SINGLETON_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3613", "-dapr-grpc-port", "41014", "-dapr-internal-grpc-port", "19024", "-metrics-port", "9203",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmssingleton.yaml"]
+    depends_on: [vmssingleton, consul-server, dapr-sentry, dapr-placement]
+
+  vmsanalyticssingleton:
+    <<: [*core, *app]
+    image: treealarm/vmsanalyticssingleton:latest
+    environment: { APP_ID: vmsanalyticssingleton, DAPR_HTTP_PORT: "3610", DAPR_GRPC_PORT: "41011" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmsanalyticssingleton-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsanalyticssingleton.token }
+    command: ["./daprd", "-app-id", "vmsanalyticssingleton", "-app-port", "${ANALYTICS_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3610", "-dapr-grpc-port", "41011", "-dapr-internal-grpc-port", "19021", "-metrics-port", "9200",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsanalyticssingleton.yaml"]
+    depends_on: [vmsanalyticssingleton, consul-server, dapr-sentry]
+
+  vmsptztrackingsingleton:
+    <<: [*core, *app]
+    image: treealarm/vmsptztrackingsingleton:latest
+    environment: { APP_ID: vmsptztrackingsingleton, DAPR_HTTP_PORT: "3616", DAPR_GRPC_PORT: "41017" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmsptztrackingsingleton-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsptztrackingsingleton.token }
+    command: ["./daprd", "-app-id", "vmsptztrackingsingleton", "-app-port", "${PTZ_TRACKING_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3616", "-dapr-grpc-port", "41017", "-dapr-internal-grpc-port", "19027", "-metrics-port", "9206",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsptztrackingsingleton.yaml"]
+    depends_on: [vmsptztrackingsingleton, consul-server, dapr-sentry, dapr-placement]
+
+  web_vms:
+    <<: [*core, *app]
+    image: treealarm/web_vms:latest
+    environment: { APP_ID: web-vms, DAPR_HTTP_PORT: "3600", DAPR_GRPC_PORT: "41001" }
+    depends_on: [vmscfg, keycloak]
+  web_vms-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/web-vms.token }
+    command: ["./daprd", "-app-id", "web-vms", "-app-port", "${WEB_VMS_PORT}", "-app-protocol", "http",
+              "-dapr-http-port", "3600", "-dapr-grpc-port", "41001", "-dapr-internal-grpc-port", "19011", "-metrics-port", "9190",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/web-vms.yaml"]
+    depends_on: [web_vms, consul-server, dapr-sentry]
+
+  # --- the core's own node, with the standalone app ids ---------------------------------------------
+
+  vms:
+    <<: [*core, *app]
+    image: treealarm/vms:latest
+    environment: { APP_ID: vms, DAPR_HTTP_PORT: "3607", DAPR_GRPC_PORT: "41008" }
+    depends_on: [vmscfg, mediamtx]
+  vms-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vms.token }
+    command: ["./daprd", "-app-id", "vms", "-app-port", "${GRPC_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3607", "-dapr-grpc-port", "41008", "-dapr-internal-grpc-port", "19018", "-metrics-port", "9197",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vms.yaml"]
+    depends_on: [vms, consul-server, dapr-sentry]
+
+  vmsfs:
+    <<: [*core, *app]
+    image: treealarm/vmsfs:latest
+    environment: { APP_ID: vmsfs, DAPR_HTTP_PORT: "3604", DAPR_GRPC_PORT: "41005" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmsfs-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsfs.token }
+    command: ["./daprd", "-app-id", "vmsfs", "-app-port", "${FS_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3604", "-dapr-grpc-port", "41005", "-dapr-internal-grpc-port", "19015", "-metrics-port", "9194",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsfs.yaml"]
+    depends_on: [vmsfs, consul-server, dapr-sentry]
+
+  vmsonvif:
+    <<: [*core, *app]
+    image: treealarm/vmsonvif:latest
+    environment: { APP_ID: vmsonvif, OWN_SERVER_ID: vms, DAPR_HTTP_PORT: "3602", DAPR_GRPC_PORT: "41003" }
+    depends_on: [vmscfg]
+  vmsonvif-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsonvif.token }
+    command: ["./daprd", "-app-id", "vmsonvif", "-app-port", "${ONVIF_SRV_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3602", "-dapr-grpc-port", "41003", "-dapr-internal-grpc-port", "19013", "-metrics-port", "9192",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsonvif.yaml"]
+    depends_on: [vmsonvif, consul-server, dapr-sentry, dapr-placement]
+
+  vmsonvif-actors:
+    <<: [*core, *app]
+    image: treealarm/vmsonvif-actors:latest
+    environment: { APP_ID: vmsonvif-actors, OWN_SERVER_ID: vms, DAPR_HTTP_PORT: "3603", DAPR_GRPC_PORT: "41004" }
+    depends_on: [vmscfg]
+  vmsonvif-actors-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsonvif-actors.token }
+    command: ["./daprd", "-app-id", "vmsonvif-actors", "-app-port", "${ONVIF_ACTORS_PORT}", "-app-protocol", "http",
+              "-dapr-http-port", "3603", "-dapr-grpc-port", "41004", "-dapr-internal-grpc-port", "19014", "-metrics-port", "9193",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsonvif-actors.yaml"]
+    depends_on: [vmsonvif-actors, consul-server, dapr-sentry, dapr-placement]
+
+  vmslogger:
+    <<: [*core, *app]
+    image: treealarm/vmslogger:latest
+    environment: { APP_ID: vmslogger, DAPR_HTTP_PORT: "3605", DAPR_GRPC_PORT: "41006" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmslogger-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmslogger.token }
+    command: ["./daprd", "-app-id", "vmslogger", "-app-port", "${LOGGER_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3605", "-dapr-grpc-port", "41006", "-dapr-internal-grpc-port", "19016", "-metrics-port", "9195",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmslogger.yaml"]
+    depends_on: [vmslogger, consul-server, dapr-sentry]
+
+  # --- a node -------------------------------------------------------------------------------------
+
+  consul-agent:
+    <<: *node
+    image: hashicorp/consul:latest
+    network_mode: host
+    restart: unless-stopped
+    command: ["agent", "-ui=false", "-datacenter=tavms", "-node=${TAVMS_NODE_NAME}",
+              "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}", "-retry-join=${CORE_ADDRESS}",
+              "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"]
+    volumes:
+      - ./data/consul:/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      retries: 12
+
+  node-vms:
+    <<: [*node, *app]
+    image: treealarm/vms:latest
+    # Its own node's ONVIF service, not the core's: only that one reaches the node's cameras.
+    environment: { APP_ID: "vms-${TAVMS_NODE_NAME}", DAPR_ONVIF_APP_ID: "vmsonvif-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3607", DAPR_GRPC_PORT: "41008" }
+  node-vms-dapr:
+    <<: [*node, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vms-${TAVMS_NODE_NAME}.token" }
+    command: ["./daprd", "-app-id", "vms-${TAVMS_NODE_NAME}", "-app-port", "${GRPC_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3607", "-dapr-grpc-port", "41008", "-dapr-internal-grpc-port", "19018", "-metrics-port", "9197",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vms-${TAVMS_NODE_NAME}.yaml"]
+    depends_on: [node-vms, consul-agent]
+
+  node-vmsfs:
+    <<: [*node, *app]
+    image: treealarm/vmsfs:latest
+    environment: { APP_ID: "vmsfs-${TAVMS_NODE_NAME}", DAPR_ONVIF_APP_ID: "vmsonvif-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3604", DAPR_GRPC_PORT: "41005" }
+  node-vmsfs-dapr:
+    <<: [*node, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vmsfs-${TAVMS_NODE_NAME}.token" }
+    command: ["./daprd", "-app-id", "vmsfs-${TAVMS_NODE_NAME}", "-app-port", "${FS_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3604", "-dapr-grpc-port", "41005", "-dapr-internal-grpc-port", "19015", "-metrics-port", "9194",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsfs-${TAVMS_NODE_NAME}.yaml"]
+    depends_on: [node-vmsfs, consul-agent]
+
+  node-vmsonvif:
+    <<: [*node, *app]
+    image: treealarm/vmsonvif:latest
+    environment: { APP_ID: "vmsonvif-${TAVMS_NODE_NAME}", OWN_SERVER_ID: "vms-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3602", DAPR_GRPC_PORT: "41003" }
+  node-vmsonvif-dapr:
+    <<: [*node, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vmsonvif-${TAVMS_NODE_NAME}.token" }
+    command: ["./daprd", "-app-id", "vmsonvif-${TAVMS_NODE_NAME}", "-app-port", "${ONVIF_SRV_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3602", "-dapr-grpc-port", "41003", "-dapr-internal-grpc-port", "19013", "-metrics-port", "9192",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsonvif-${TAVMS_NODE_NAME}.yaml"]
+    depends_on: [node-vmsonvif, consul-agent]
+
+  node-vmsonvif-actors:
+    <<: [*node, *app]
+    image: treealarm/vmsonvif-actors:latest
+    environment: { APP_ID: "vmsonvif-actors-${TAVMS_NODE_NAME}", OWN_SERVER_ID: "vms-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3603", DAPR_GRPC_PORT: "41004" }
+  node-vmsonvif-actors-dapr:
+    <<: [*node, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vmsonvif-actors-${TAVMS_NODE_NAME}.token" }
+    command: ["./daprd", "-app-id", "vmsonvif-actors-${TAVMS_NODE_NAME}", "-app-port", "${ONVIF_ACTORS_PORT}", "-app-protocol", "http",
+              "-dapr-http-port", "3603", "-dapr-grpc-port", "41004", "-dapr-internal-grpc-port", "19014", "-metrics-port", "9193",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsonvif-actors-${TAVMS_NODE_NAME}.yaml"]
+    depends_on: [node-vmsonvif-actors, consul-agent]
+
+  node-vmslogger:
+    <<: [*node, *app]
+    image: treealarm/vmslogger:latest
+    environment: { APP_ID: "vmslogger-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3605", DAPR_GRPC_PORT: "41006" }
+  node-vmslogger-dapr:
+    <<: [*node, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/vmslogger-${TAVMS_NODE_NAME}.token" }
+    command: ["./daprd", "-app-id", "vmslogger-${TAVMS_NODE_NAME}", "-app-port", "${LOGGER_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3605", "-dapr-grpc-port", "41006", "-dapr-internal-grpc-port", "19016", "-metrics-port", "9195",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmslogger-${TAVMS_NODE_NAME}.yaml"]
+    depends_on: [node-vmslogger, consul-agent]
+
+configs:
+  rabbitmq-listeners:
+    content: |
+      management.tcp.ip = 127.0.0.1
+      management.tcp.port = ${RABBITMQ_MANAGEMENT_PORT}

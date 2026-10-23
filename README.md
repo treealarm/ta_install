@@ -151,6 +151,48 @@ No camera is pre-configured. Open the web UI and add one the normal way (ONVIF d
 manual RTSP URL). To enable analytics on it: Admin → Analytics → add a watch (camera + stream +
 classes), then arm the camera.
 
+## Several machines: a core and nodes
+
+`docker-compose.yml` is one machine. To spread a deployment over several — a **core** with the
+infrastructure and the system-wide services, and **nodes**, each with its own cameras, recording
+and ONVIF — use `docker-compose.distributed.yml` through `scripts/distributed.sh` (Linux hosts;
+needs `openssl` and `jq`). The core is a node too.
+
+```sh
+# on the core: set POSTGRES_PASSWORD and RABBITMQ_DEFAULT_PASS in .env first (nodes reach both)
+scripts/distributed.sh core 192.168.1.10      # this machine's address on the LAN
+scripts/distributed.sh up -d
+scripts/distributed.sh package hall           # a node named "hall" -> data/distributed/node-hall.tar.gz
+scripts/distributed.sh up -d                  # the core's services learn the node
+
+# on the node, with this repository and the package copied over
+scripts/distributed.sh join node-hall.tar.gz 192.168.1.20
+scripts/distributed.sh up -d
+```
+
+A node's services carry its name: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`, `vmsonvif-actors-hall`,
+`vmslogger-hall`. Its cameras are added in the web UI on the core with server `vms-hall`; ONVIF
+reaches them from the node, and their video is published to the core's MediaMTX.
+
+- **Every container runs in the host's network**, with a port of its own per sidecar, as on
+  Windows. Apps and the sidecars' API listen on the loopback; what other machines reach is each
+  sidecar's internal gRPC port on the machine's address.
+- **App ids are found through HashiCorp Consul**: a server on the core, an agent on each node,
+  gossip encrypted with the deployment's key.
+- **Sidecars talk over mutual TLS**, with certificates from Dapr Sentry on the core. Sentry signs a
+  certificate for an app id only against a token for it, signed with the core's key; a node gets
+  tokens for its own app ids only, in its package.
+- **The package is a credential**: it holds the node's tokens, the core's `.env` with its passwords
+  and Consul's gossip key. Move it the way you would move a password.
+- **Firewall on the core**: let the nodes reach PostgreSQL (`POSTGRES_PORT`), RabbitMQ
+  (`RABBITMQ_PORT`), Dapr placement (6050) and Sentry (6055), Consul (8300, 8301 TCP/UDP),
+  MediaMTX (RTSP 8554) and the sidecars' internal ports (19011–19027); browsers need web, mt_admin
+  and MediaMTX's WebRTC (8189/UDP). On a node: the core needs Consul (8301 TCP/UDP) and the
+  sidecars' internal ports. With `network_mode: host` Docker publishes nothing itself, so ufw or
+  nftables rules apply as written.
+- **Not yet in a distributed deployment**: the Square integration, the analytics worker and roitrc
+  (`ta_vms/docs/future_plans/`), and MediaMTX on the nodes.
+
 ## Building and publishing images
 
 Requires sibling source checkouts (`../ta_vms`, `../video_a`; override with
