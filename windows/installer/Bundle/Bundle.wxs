@@ -27,6 +27,11 @@
     AboutUrl="https://treealarm.dev"
     HelpUrl="https://github.com/treealarm/ta_install/blob/main/windows/README.md">
 
+    <!-- The Open button hands the shortcut to Explorer rather than opening it itself: started through
+         the UAC prompt, the wizard's own ShellExecuteEx of the .url failed with "no application is
+         associated" (0x80070483) on the test machine, though the same call worked from every other
+         process tried there, and from the wizard when it was started elevated. Explorer also opens
+         the browser as the user, never elevated. -->
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
         Theme="hyperlinkLicense"
@@ -35,7 +40,8 @@
         LogoFile="logo.png"
         LicenseUrl="https://github.com/treealarm/ta_install/blob/main/LICENSE"
         ShowVersion="yes"
-        LaunchTarget="[InstallFolder]\TreeAlarm VMS.url" />
+        LaunchTarget="[WindowsFolder]explorer.exe"
+        LaunchArguments="&quot;[InstallFolder]\TreeAlarm VMS.url&quot;" />
     </BootstrapperApplication>
 
     <!-- Windows 10 1809 / Server 2019: the oldest the bundled runtimes support. -->
