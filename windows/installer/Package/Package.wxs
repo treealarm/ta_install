@@ -120,6 +120,19 @@
       Impersonate="no"
       Return="check"
       ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Stop-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot;" />
+    <!-- An upgrade stops the running stack once more, before InstallValidate: that action asks who
+         holds the files it will replace, and with the stack up the wizard showed "Files In Use" for
+         Keycloak's java (Retry / Ignore / Exit) on every upgrade. Immediate, so before the
+         transaction: a cancel between here and InstallInitialize leaves the stack stopped until the
+         next boot, when the services start by themselves. It runs with the installing user's rights,
+         elevated under the bundle. The services only, inline: Stop-TaVms.ps1 is not on disk yet, and
+         Inno Setup never installed it; TaVmsStop or Inno's uninstaller ends what is left. -->
+    <CustomAction
+      Id="TaVmsStopBeforeValidate"
+      Directory="System64Folder"
+      Execute="immediate"
+      Return="ignore"
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -Command &quot;Stop-Service TaVmsHost, TaVms.RabbitMQ, TaVms.Postgres -Force -ErrorAction SilentlyContinue&quot;" />
     <!-- Uninstalled: the services and firewall rules go, the data directory stays. -->
     <CustomAction
       Id="TaVmsRemove"
@@ -130,6 +143,7 @@
       ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Uninstall-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot;" />
 
     <InstallExecuteSequence>
+      <Custom Action="TaVmsStopBeforeValidate" Before="InstallValidate" Condition="(WIX_UPGRADE_DETECTED OR INNOINSTALLLOCATION) AND NOT REMOVE" />
       <Custom Action="TaVmsRemoveInno" After="InstallInitialize" Condition="INNOINSTALLLOCATION AND NOT REMOVE" />
       <Custom Action="TaVmsStop" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND UPGRADINGPRODUCTCODE" />
       <Custom Action="TaVmsRemove" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
