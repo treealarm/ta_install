@@ -3,6 +3,47 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-23: the wizard, upgrading WiX 0.1.6 to WiX 0.1.6
+
+The CI build of ta_install c198af7 (ta_vms 8a8e7e1) over the installation of bb256ed, run by hand
+through the wizard for the first time: exit code 0, no restart, the web interface up. 7 min 11 s
+from the Install button to the end, of which 2 min 22 s were the old package's files-in-use
+check and the user's answers to it.
+
+| Phase | |
+|---|---|
+| caching the MSI | 6 s |
+| the new MSI: costing, InstallValidate through Restart Manager | 57 s |
+| the old MSI's InstallValidate, the old way, with two dialogs | 51 s + 91 s |
+| stopping the old stack (`Stop-TaVms.ps1`) | 10 s |
+| removing the old files, copying the new | 95 s |
+| `Install-TaVms.ps1` (`site.env` exists, kept) | 87 s, RabbitMQ 40 s of it |
+
+- **A files-in-use dialog naming NVIDIA Overlay.** The old package is removed inside the new
+  one's transaction, and it brings its own properties: bb256ed still had
+  `MSIRESTARTMANAGERCONTROL=Disable`. Its InstallValidate ran before its `TaVmsStop`, with the
+  whole stack up, looked for holders the old way and reported 96 applications twice: ours, and
+  everything with a DLL of the same name loaded — NVIDIA Overlay (`jre\bin\msvcp140.dll`),
+  PhoneExperienceHost, OneDrive. The dialog shows only processes with a window, so it named
+  NVIDIA Overlay and none of ours. Already fixed for every later upgrade: the new package's
+  InstallValidate went through Restart Manager (`DisableShutdown`, 7091247), took 20 s and asked
+  nothing. Its "a critical application holds files in use, so a reboot will be necessary" did not
+  turn into a restart: the files were free by the time they were replaced.
+- **Fixed: the Options page came back on an upgrade.** The bundle looked for
+  `config\site.env` from its unelevated process; `config` is open to administrators only, so the
+  search failed with "access denied" (0x80070005) and the bundle took the install for a first
+  one. Setting the archive's place there would have been ignored silently, as `Install-TaVms.ps1`
+  keeps the one in `site.env`. It looks for the `config` directory now, which an unelevated
+  process can see: checked on the box with a limited token (a8e3157).
+- **Open: the Launch button did nothing.** Six clicks, six `Failed to launch target ...
+  TreeAlarm VMS.url` (0x80070483, no application associated). WixStdBA calls `ShellExecuteEx`
+  with "open"; the same call with the same flags, the same path (doubled backslash and all) and
+  system32-only DLL search opened the page in Chrome from an SSH session, from the interactive
+  session and from an MTA thread. Not reproduced outside the wizard.
+- **The stop with the new VmsFs: 4.5 s, nothing killed.** VmsFs 0.9 s after the request (4.4 s
+  and 7.0 s with the old one, which crashed on every stop), the whole stack 4.3 s. The old
+  stack, stopped by the upgrade itself, took 10 s.
+
 ## 2026-10-22: HEVC transcoding on NVENC (GeForce GTX 1050 Ti)
 
 The v0.1.6 installation with only `vms` replaced by CI builds of ta_vms' `nvenc` branch
