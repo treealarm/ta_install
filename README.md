@@ -182,8 +182,9 @@ reaches them from the node, and their video is published to the core's MediaMTX.
 - **Sidecars talk over mutual TLS**, with certificates from Dapr Sentry on the core. Sentry signs a
   certificate for an app id only against a token for it, signed with the core's key; a node gets
   tokens for its own app ids only, in its package.
-- **The package is a credential**: it holds the node's tokens, the core's `.env` with its passwords
-  and Consul's gossip key. Move it the way you would move a password.
+- **The package is a credential**: it holds the node's tokens, the core's shared values (the
+  credentials and ports of its PostgreSQL, RabbitMQ and MediaMTX) and Consul's gossip key. Move it
+  the way you would move a password. Everything else a node runs with comes from its own `.env`.
 - **Firewall on the core**: let the nodes reach PostgreSQL (`POSTGRES_PORT`), RabbitMQ
   (`RABBITMQ_PORT`), Dapr placement (6050) and Sentry (6055), Consul (8300, 8301 TCP/UDP),
   MediaMTX (RTSP 8554) and the sidecars' internal ports (19011–19027); browsers need web, mt_admin

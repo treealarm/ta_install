@@ -29,10 +29,21 @@ COMPOSE=(docker compose -f docker-compose.distributed.yml --env-file .env --env-
 # Sentry's own SPIFFE id, which every token names as its audience; and the trust domains Dapr uses
 # by default outside Kubernetes: "localhost" for the control plane, "public" for applications.
 SENTRY_ID=spiffe://localhost/ns/default/dapr-sentry
+# What a node takes from its core (core.env in the package): the credentials and ports of the
+# core's PostgreSQL, RabbitMQ and MediaMTX. Nothing else: the rest of an installation's settings are
+# the same in every release or belong to the machine (paths, hosts), and a Windows core's would be
+# Windows paths. TaVmsHost on Windows writes and reads the same list.
+CORE_KEYS='^(POSTGRES_(PORT|USER|PASSWORD)|POSTGRES_[A-Z0-9_]+_DB|RABBITMQ_(PORT|DEFAULT_USER|DEFAULT_PASS)|VMS_MEDIAMTX_(PUBLISH|READ)_(USER|PASS))[[:space:]]*='
 
 die() { echo "error: $*" >&2; exit 1; }
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-env_value() { sed -n "s/^$1=//p" .env | tail -n1 | tr -d '"'; }
+# A value of this machine's environment: .env, overridden by distributed.env (on a node that holds
+# the core's values from core.env). Double quotes are stripped; single quotes are not, which no
+# generated value uses.
+env_value() {
+  { cat .env; if [[ -f "$DIST/distributed.env" ]]; then cat "$DIST/distributed.env"; fi; } |
+    sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" | tail -n1 | tr -d '"'
+}
 
 # A JWT for Sentry's jwks validator, signed with the deployment's Ed25519 key. No "exp": the token is
 # the credential of a machine's sidecar, and what revokes it is a new key in the JWKS.
@@ -229,6 +240,8 @@ write_machine_env() {
     echo "DAPR_ANALYTICS_WORKER_APP_IDS="
     echo "DAPR_SQUARE_SINGLETON_APP_ID="
     echo "SQUARE_INTEGRATION_SINK_APP_ID="
+    # A node: the core's shared values, last, so that they win over this machine's .env.
+    if [[ -f "$DIST/core.env" ]]; then cat "$DIST/core.env"; fi
   } > "$DIST/distributed.env"
 }
 
@@ -245,7 +258,7 @@ cmd_package() {
   umask 077
   mkdir -p "$tmp/tokens"
   cp "$DIST/shared.env" "$DIST/nodes" "$tmp/"
-  cp .env "$tmp/core.env"
+  grep -E "$CORE_KEYS" .env > "$tmp/core.env" || die "no PostgreSQL/RabbitMQ settings in .env"
   echo "$node" > "$tmp/name"
   # The node's sidecars, by the app ids the compose file gives them under this name.
   while read -r id _; do
@@ -263,8 +276,9 @@ cmd_join() {
   umask 077
   mkdir -p "$DIST/tokens"
   tar -xzf "$package" -C "$DIST"
-  # The core's passwords and settings, so that this node's services and components use the same.
-  cp "$DIST/core.env" .env
+  # The core's passwords and ports go into distributed.env (write_machine_env), on top of this
+  # machine's own .env, so that this node's services and components use the same as the core's.
+  [[ -f "$DIST/core.env" ]] || die "$package has no core.env"
   write_machine_env node "$address" "$(cat "$DIST/name")"
   write_components "$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")"
   write_sidecars node "$(cat "$DIST/name")"
