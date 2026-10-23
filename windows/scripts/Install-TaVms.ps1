@@ -222,12 +222,15 @@ function Install-RabbitMq {
   $port = Get-StackValue 'RABBITMQ_PORT'
   $user = Get-StackValue 'RABBITMQ_DEFAULT_USER'
   $pass = Get-StackValue 'RABBITMQ_DEFAULT_PASS'
+  # Erlang distribution (25672) and epmd (4369) stay on every address, behind the cookie: the
+  # Windows service starts distribution before it reads this file, so a listener setting here does
+  # nothing, and with both forced onto the loopback rabbitmqctl, which looks the node up by the
+  # machine's name and so at its LAN address, could not reach it any more (tried on the test box).
   [IO.File]::WriteAllLines((Join-Path $base 'rabbitmq.conf'), [string[]] @(
     '# Written by Install-TaVms.ps1 on every install. Loopback only: every client is on this machine.',
     "listeners.tcp.default = 127.0.0.1:$port",
     'management.tcp.ip = 127.0.0.1',
-    "management.tcp.port = $(Get-StackValue 'RABBITMQ_MANAGEMENT_PORT')",
-    'distribution.listener.interface = 127.0.0.1'
+    "management.tcp.port = $(Get-StackValue 'RABBITMQ_MANAGEMENT_PORT')"
   ))
   [IO.File]::WriteAllText((Join-Path $base 'enabled_plugins'), '[rabbitmq_management].')
 

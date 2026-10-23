@@ -175,6 +175,18 @@ public sealed class StackConfigTests : IDisposable
   }
 
   [Fact]
+  public void Sidecars_listen_on_the_loopback_only()
+  {
+    var config = Load();
+    foreach (var app in config.Manifest.Apps)
+    {
+      var args = config.Sidecar(app).Args.ToList();
+      foreach (var flag in new[] { "--dapr-listen-addresses", "--dapr-internal-grpc-listen-address", "--metrics-listen-address" })
+        Assert.Equal("127.0.0.1", args[args.IndexOf(flag) + 1]);
+    }
+  }
+
+  [Fact]
   public void Name_resolution_is_validated()
   {
     File.AppendAllLines(Path.Combine(_data, "config", "site.env"), ["TAVMS_DAPR_NAME_RESOLUTION=mdns"]);

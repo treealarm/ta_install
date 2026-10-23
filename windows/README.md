@@ -117,6 +117,14 @@ ta_vms build: `gh workflow run windows-installer.yml`.
 
 - **One localhost for every sidecar.** Each `daprd` has ports of its own (`config/services.json`),
   and each service learns its sidecar's from `DAPR_GRPC_PORT`/`DAPR_HTTP_PORT`.
+- **Nothing but the web interface listens on the LAN for the stack's own traffic.** Every service
+  listens on the loopback, since its sidecar is its only client; every sidecar's API and metrics
+  are on the loopback too, and its internal port on `DAPR_HOST_IP`, which is the loopback here.
+  daprd listens on every address unless told otherwise, and its API calls any service and reads
+  and writes the state store without asking who calls. What the LAN does reach is in the firewall
+  rules: web_srv, mt_admin, RTSP, WebRTC media and ONVIF discovery — and RabbitMQ's Erlang
+  distribution (25672) and epmd (4369), behind the cookie: the Windows service starts distribution
+  before it reads its configuration, and `rabbitmqctl` finds the node by the machine's name.
 - **App ids resolve through Dapr's `sqlite` resolver**, not mDNS as in Docker: every sidecar
   registers at `127.0.0.1` (`DAPR_HOST_IP`) in a file in the data directory. mDNS announced them at
   the machine's LAN address, so calls between services on one machine broke when that address

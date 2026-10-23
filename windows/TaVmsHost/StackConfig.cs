@@ -72,9 +72,12 @@ internal sealed class StackConfig
     Path.GetDirectoryName(ResolveExe(p.Exe))!);
 
   // The same flags compose gives every sidecar, except that here all of them share one localhost,
-  // so each needs ports of its own.
+  // so each needs ports of its own. daprd listens on every address unless told otherwise: its API
+  // and metrics are for its own app and nobody else, so the loopback; the internal port is how
+  // other sidecars reach it, so the address it registers at, which is the loopback on one machine.
   public ProcessSpec Sidecar(DaprApp a)
   {
+    var hostIp = Require("DAPR_HOST_IP");
     var args = new List<string>
     {
       "--app-id", a.AppId,
@@ -82,8 +85,11 @@ internal sealed class StackConfig
       "--app-protocol", a.Protocol,
       "--dapr-http-port", Num(a.DaprHttpPort),
       "--dapr-grpc-port", Num(a.DaprGrpcPort),
+      "--dapr-listen-addresses", "127.0.0.1",
       "--dapr-internal-grpc-port", Num(a.DaprInternalGrpcPort),
+      "--dapr-internal-grpc-listen-address", hostIp,
       "--metrics-port", Num(a.MetricsPort),
+      "--metrics-listen-address", "127.0.0.1",
       "--resources-path", ComponentsDir,
       "--config", DaprConfigPath,
       "--log-level", "info",
@@ -95,7 +101,7 @@ internal sealed class StackConfig
       args.AddRange(["--placement-host-address", $"127.0.0.1:{RequirePort("DAPR_PLACEMENT_PORT")}"]);
     }
     var daprd = ResolveExe(@"dapr\daprd.exe");
-    var env = new Dictionary<string, string> { ["DAPR_HOST_IP"] = Require("DAPR_HOST_IP") };
+    var env = new Dictionary<string, string> { ["DAPR_HOST_IP"] = hostIp };
     return new ProcessSpec(a.SidecarName, daprd, args, env, Path.GetDirectoryName(daprd)!);
   }
 
