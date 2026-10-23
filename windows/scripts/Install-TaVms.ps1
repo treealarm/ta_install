@@ -12,10 +12,14 @@
        only the settings a newer version introduced
     2. data directories and their ACLs (the services run as LocalService; passwords readable only
        by administrators and the services)
-    3. PostgreSQL: initdb on first install, service TaVms.Postgres (NetworkService)
-    4. RabbitMQ: service TaVms.RabbitMQ, its user, loopback-only listeners
-    5. firewall rules for what the LAN must reach: the web UI, RTSP, WebRTC media, ONVIF discovery
-    6. service TaVmsHost ("TreeAlarm VMS"), which runs everything else
+    3. a core or node of a deployment over several machines (-Role): TaVmsHost core, or
+       TaVmsHost join with the node's package, once
+    4. PostgreSQL: initdb on first install, service TaVms.Postgres (NetworkService); on the loopback,
+       and on a core also at its address for the nodes (not on a node: it uses the core's)
+    5. RabbitMQ: service TaVms.RabbitMQ, its user; listeners as PostgreSQL's (not on a node)
+    6. firewall rules for what other machines must reach: the web UI, RTSP, WebRTC media, ONVIF
+       discovery, and by role what the core's and nodes' services need from each other
+    7. service TaVmsHost ("TreeAlarm VMS"), which runs everything else
 
   A log of each run goes to <DataDir>\install-logs. Written for Windows PowerShell 5.1, which is
   what a fresh Windows has.
@@ -24,7 +28,17 @@ param(
   [string] $InstallDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
   [string] $DataDir = (Join-Path $env:ProgramData 'TreeAlarm\VMS'),
   # First install only: where recordings and exports go. Ignored once site.env exists.
-  [string] $StoragePath = ''
+  [string] $StoragePath = '',
+  # What this machine is (TaVmsHost's Role.cs): standalone, core or node. Empty: what the
+  # installation already is, standalone on a first install. A standalone one may become the core;
+  # nothing else changes role without an uninstall.
+  [string] $Role = '',
+  # A new core or node: this machine's address, the one the other machines reach it at. Asked for
+  # rather than guessed: VPN, Hyper-V and remote-desktop adapters give a machine several.
+  [string] $Address = '',
+  # A new node: the package its core made for it (TaVmsHost package <name> on a Windows core,
+  # scripts/distributed.sh package <name> on a Linux one), on a local disk.
+  [string] $NodePackage = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -94,6 +108,14 @@ function Get-StackValue([string] $key) {
   return ($value | Select-Object -Last 1).Trim()
 }
 
+# Whether the file changed: a server reads such a file only when it starts.
+function Set-TextFile([string] $path, [string[]] $lines) {
+  $text = ($lines -join "`r`n") + "`r`n"
+  if ((Test-Path $path) -and [IO.File]::ReadAllText($path) -eq $text) { return $false }
+  [IO.File]::WriteAllText($path, $text)
+  return $true
+}
+
 function Wait-Until([string] $what, [int] $seconds, [scriptblock] $test) {
   $deadline = (Get-Date).AddSeconds($seconds)
   while ((Get-Date) -lt $deadline) {
@@ -103,11 +125,57 @@ function Wait-Until([string] $what, [int] $seconds, [scriptblock] $test) {
   throw "$what did not come up within $seconds s"
 }
 
+# The role this run installs. MSI properties are not kept between installations, so an upgrade
+# passes none and the role comes from site.env itself, read here directly: TaVmsHost cannot read the
+# environment before site.env exists.
+function Resolve-Role {
+  $site = Join-Path $DataDir 'config\site.env'
+  $current = $null
+  if (Test-Path $site) {
+    $current = 'standalone'
+    foreach ($line in Get-Content $site) {
+      if ($line -match '^\s*TAVMS_ROLE\s*=\s*"?([A-Za-z]+)"?\s*$') { $current = $Matches[1] }
+    }
+  }
+  if (-not $Role) { if ($current) { return $current } else { return 'standalone' } }
+  if ($Role -notin 'standalone', 'core', 'node') { throw "-Role $Role`: expected standalone, core or node" }
+  if (-not $current -or $current -eq $Role -or ($current -eq 'standalone' -and $Role -eq 'core')) { return $Role }
+  throw "this installation is a $current and cannot become a $Role; uninstall it first (the data directory is kept)"
+}
+
+function Assert-OwnAddress {
+  if (-not $Address) { throw "-Role $TheRole needs -Address: this machine's address on the network the other machines share" }
+  if (-not (Get-NetIPAddress -IPAddress $Address -ErrorAction SilentlyContinue)) {
+    throw "-Address $Address is not an address of this machine"
+  }
+}
+
+# TaVmsHost core or join, once: both refuse to run twice, so a later run of this script (an upgrade)
+# finds their files and leaves them alone.
+function Initialize-Role {
+  $dist = Join-Path $DataDir 'distributed'
+  $hostExe = Join-Path $InstallDir 'host\TaVmsHost.exe'
+  if ($TheRole -eq 'core' -and -not (Test-Path (Join-Path $dist 'core\jwt.key'))) {
+    Write-Step "making this machine the core at $Address"
+    Assert-OwnAddress
+    # A standalone installation that becomes the core: its services restart with the new role.
+    Stop-Service $HostService -ErrorAction SilentlyContinue
+    Invoke-Checked $hostExe @('core', $Address, '--data', $DataDir)
+  }
+  if ($TheRole -eq 'node' -and -not (Test-Path (Join-Path $dist 'shared.env'))) {
+    Write-Step "joining the core with $NodePackage"
+    Assert-OwnAddress
+    if (-not $NodePackage -or -not (Test-Path $NodePackage)) { throw "-Role node needs -NodePackage, the package the core made for this node" }
+    Invoke-Checked $hostExe @('join', [IO.Path]::GetFullPath($NodePackage), $Address, '--data', $DataDir)
+  }
+}
+
 function New-SiteEnv([string] $path) {
   # Generated for this machine. A new installation gets all of them; an upgrade gets only the ones a
   # newer version introduced, and nothing already in the file is touched: PostgreSQL, RabbitMQ and
-  # Keycloak were set up with what is there.
-  $generated = [ordered]@{
+  # Keycloak were set up with what is there. A node gets none: it runs no PostgreSQL, RabbitMQ,
+  # MediaMTX, Keycloak or web, and uses the core's credentials, which come in its package.
+  $generated = if ($TheRole -eq 'node') { [ordered]@{} } else { [ordered]@{
     POSTGRES_PORT             = { Get-FreePort 5432 }
     POSTGRES_PASSWORD         = { New-Secret }
     RABBITMQ_PORT             = { Get-FreePort 5672 }
@@ -118,7 +186,7 @@ function New-SiteEnv([string] $path) {
     VMS_WHEP_SESSION_KEY      = { New-SessionKey }
     # Keycloak's own administrator (master realm). Keycloak takes it on its first start only.
     KEYCLOAK_ADMIN_PASSWORD   = { New-Secret }
-  }
+  } }
 
   if (Test-Path $path) {
     $present = @(Get-Content $path | Where-Object { $_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=' } | ForEach-Object { $Matches[1] })
@@ -170,6 +238,11 @@ function Initialize-DataDirectories {
   Grant-Access (Join-Path $InstallDir 'keycloak\data') @("${SidLocalService}:(OI)(CI)M")
   # RabbitMQ (erlsrv) runs as LocalSystem.
   Grant-Access (Join-Path $DataDir 'rabbitmq') @("${SidAdmins}:(OI)(CI)F", "${SidSystem}:(OI)(CI)F") -Private
+  # Consul's state, its gossip keyring among it. TaVmsHost closes <DataDir>\distributed itself.
+  if ($TheRole -ne 'standalone') {
+    New-Item -ItemType Directory -Force (Join-Path $DataDir 'consul') | Out-Null
+    Grant-Access (Join-Path $DataDir 'consul') @("${SidAdmins}:(OI)(CI)F", "${SidSystem}:(OI)(CI)F", "${SidLocalService}:(OI)(CI)M") -Private
+  }
 
   foreach ($key in 'VMS_STORAGE_BASE_PATH', 'VMS_EXPORT_BASE_PATH') {
     $dir = Get-StackValue $key
@@ -193,15 +266,35 @@ function Install-Postgres {
     } finally {
       Remove-Item $pwfile -Force
     }
-    # Last one wins in postgresql.conf. Loopback only: every client is on this machine.
-    Add-Content (Join-Path $data 'postgresql.conf') "`r`n# TreeAlarm VMS`r`nport = $port`r`nlisten_addresses = 'localhost'`r`n"
   }
+  # Ours, in files of their own that every run rewrites; included last, so that they win over what
+  # initdb wrote (and over the port and listen_addresses earlier versions appended). On one machine
+  # the loopback only; a core also listens at its address, for the nodes' state stores and VmsFs.
+  $changed = $false
+  if (-not (Select-String -Path (Join-Path $data 'postgresql.conf') -SimpleMatch "include = 'tavms.conf'" -Quiet)) {
+    Add-Content (Join-Path $data 'postgresql.conf') "`r`n# TreeAlarm VMS, rewritten by every install`r`ninclude = 'tavms.conf'`r`n"
+    $changed = $true
+  }
+  if (-not (Select-String -Path (Join-Path $data 'pg_hba.conf') -SimpleMatch "include tavms_hba.conf" -Quiet)) {
+    Add-Content (Join-Path $data 'pg_hba.conf') "`r`n# TreeAlarm VMS, rewritten by every install`r`ninclude tavms_hba.conf`r`n"
+    $changed = $true
+  }
+  $listen = if ($TheRole -eq 'core') { "localhost, $(Get-StackValue 'DAPR_HOST_IP')" } else { 'localhost' }
+  $changed = (Set-TextFile (Join-Path $data 'tavms.conf') @(
+    '# Written by Install-TaVms.ps1 on every install.',
+    "port = $port",
+    "listen_addresses = '$listen'")) -or $changed
+  $hba = @('# Written by Install-TaVms.ps1 on every install. A core lets the nodes on its subnet in.')
+  if ($TheRole -eq 'core') { $hba += 'host all all samenet scram-sha-256' }
+  $changed = (Set-TextFile (Join-Path $data 'tavms_hba.conf') $hba) -or $changed
 
   if (-not (Get-Service $PostgresService -ErrorAction SilentlyContinue)) {
     Invoke-Checked (Join-Path $bin 'pg_ctl.exe') @('register', '-N', $PostgresService,
       '-U', 'NT AUTHORITY\NetworkService', '-D', $data, '-S', 'auto', '-w')
     Invoke-Checked sc.exe @('description', $PostgresService, 'PostgreSQL for TreeAlarm VMS')
   }
+  # listen_addresses takes a restart, not a reload.
+  if ($changed -and (Get-Service $PostgresService).Status -eq 'Running') { Restart-Service $PostgresService }
   Start-Service $PostgresService
   Wait-Until 'PostgreSQL' 120 {
     & (Join-Path $bin 'pg_isready.exe') -h localhost -p $port -q
@@ -226,12 +319,14 @@ function Install-RabbitMq {
   # Windows service starts distribution before it reads this file, so a listener setting here does
   # nothing, and with both forced onto the loopback rabbitmqctl, which looks the node up by the
   # machine's name and so at its LAN address, could not reach it any more (tried on the test box).
-  [IO.File]::WriteAllLines((Join-Path $base 'rabbitmq.conf'), [string[]] @(
-    '# Written by Install-TaVms.ps1 on every install. Loopback only: every client is on this machine.',
-    "listeners.tcp.default = 127.0.0.1:$port",
+  # On one machine the loopback only; a core also listens at its address, for the nodes' pub/sub.
+  $listeners = @("listeners.tcp.1 = 127.0.0.1:$port")
+  if ($TheRole -eq 'core') { $listeners += "listeners.tcp.2 = $(Get-StackValue 'DAPR_HOST_IP'):$port" }
+  [IO.File]::WriteAllLines((Join-Path $base 'rabbitmq.conf'), [string[]] (@(
+    '# Written by Install-TaVms.ps1 on every install.') + $listeners + @(
     'management.tcp.ip = 127.0.0.1',
     "management.tcp.port = $(Get-StackValue 'RABBITMQ_MANAGEMENT_PORT')"
-  ))
+  )))
   [IO.File]::WriteAllText((Join-Path $base 'enabled_plugins'), '[rabbitmq_management].')
 
   # The service runs as LocalSystem and reads its cookie from that profile; the CLI is handed the
@@ -274,25 +369,55 @@ function Set-FirewallRules {
   Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue | Remove-NetFirewallRule
   # Any profile: a camera network without a gateway is "unidentified", which Windows files as Public.
   $common = @{ Group = $FirewallGroup; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
-  New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - web' -Protocol TCP -LocalPort (Get-StackValue 'WEB_VMS_PORT') `
-    -Program (Join-Path $InstallDir 'dotnet\web_srv.Server\web_srv.Server.exe') | Out-Null
-  New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - users' -Protocol TCP -LocalPort (Get-StackValue 'MT_ADMIN_PORT') `
-    -Program (Join-Path $InstallDir 'mt_admin\mt_admin.Server.exe') | Out-Null
-  New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - RTSP' -Protocol TCP -LocalPort 8554 `
-    -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
-  New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - WebRTC media' -Protocol UDP -LocalPort 8189 `
-    -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
+  # What only the other machines of the deployment reach: from this subnet, not from anywhere.
+  $deployment = $common + @{ RemoteAddress = 'LocalSubnet' }
+  if ($TheRole -ne 'node') {
+    New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - web' -Protocol TCP -LocalPort (Get-StackValue 'WEB_VMS_PORT') `
+      -Program (Join-Path $InstallDir 'dotnet\web_srv.Server\web_srv.Server.exe') | Out-Null
+    New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - users' -Protocol TCP -LocalPort (Get-StackValue 'MT_ADMIN_PORT') `
+      -Program (Join-Path $InstallDir 'mt_admin\mt_admin.Server.exe') | Out-Null
+    # A core's MediaMTX also takes the nodes' cameras, published over RTSP.
+    New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - RTSP' -Protocol TCP -LocalPort 8554 `
+      -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
+    New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - WebRTC media' -Protocol UDP -LocalPort 8189 `
+      -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
+  }
   # ProbeMatch replies come back to whatever port the probe went out from.
   New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - ONVIF discovery' -Protocol UDP `
     -Program (Join-Path $InstallDir 'dotnet\VmsOnvif\VmsOnvif.exe') | Out-Null
+  if ($TheRole -eq 'standalone') { return }
+
+  # Every machine: the sidecars' internal gRPC ports (services.json), mutual TLS between them, and
+  # Consul's gossip.
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - Dapr sidecars' -Protocol TCP -LocalPort '19011-19027' `
+    -Program (Join-Path $InstallDir 'dapr\daprd.exe') | Out-Null
+  foreach ($protocol in 'TCP', 'UDP') {
+    New-NetFirewallRule @deployment -DisplayName "TreeAlarm VMS - Consul gossip ($protocol)" -Protocol $protocol -LocalPort 8301 `
+      -Program (Join-Path $InstallDir 'consul\consul.exe') | Out-Null
+  }
+  if ($TheRole -ne 'core') { return }
+
+  # The core: what the nodes' services and sidecars connect to.
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - Consul server' -Protocol TCP -LocalPort 8300 `
+    -Program (Join-Path $InstallDir 'consul\consul.exe') | Out-Null
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - Dapr Sentry' -Protocol TCP -LocalPort (Get-StackValue 'DAPR_SENTRY_PORT') `
+    -Program (Join-Path $InstallDir 'dapr\sentry.exe') | Out-Null
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - Dapr placement' -Protocol TCP -LocalPort (Get-StackValue 'DAPR_PLACEMENT_PORT') `
+    -Program (Join-Path $InstallDir 'dapr\placement.exe') | Out-Null
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - PostgreSQL' -Protocol TCP -LocalPort (Get-StackValue 'POSTGRES_PORT') `
+    -Program (Join-Path $InstallDir 'pgsql\bin\postgres.exe') | Out-Null
+  # By port: the listener is erl.exe, in a directory named after the Erlang version.
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - RabbitMQ' -Protocol TCP -LocalPort (Get-StackValue 'RABBITMQ_PORT') | Out-Null
 }
 
 function Install-HostService {
   Write-Step 'TreeAlarm VMS service'
   $exe = Join-Path $InstallDir 'host\TaVmsHost.exe'
   if (-not (Get-Service $HostService -ErrorAction SilentlyContinue)) {
+    # A node runs neither PostgreSQL nor RabbitMQ: it uses the core's.
+    $depends = if ($TheRole -eq 'node') { @{} } else { @{ DependsOn = $PostgresService, $RabbitService } }
     New-Service -Name $HostService -DisplayName 'TreeAlarm VMS' -StartupType Automatic `
-      -BinaryPathName "`"$exe`" --data `"$DataDir`"" -DependsOn $PostgresService, $RabbitService `
+      -BinaryPathName "`"$exe`" --data `"$DataDir`"" @depends `
       -Description 'Runs the TreeAlarm VMS services and their Dapr sidecars. Logs: host-logs in the data directory.' | Out-Null
     $svc = Get-CimInstance Win32_Service -Filter "Name='$HostService'"
     $result = Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{ StartName = 'NT AUTHORITY\LocalService'; StartPassword = '' }
@@ -307,8 +432,14 @@ function Install-HostService {
 # The Start menu and desktop shortcuts (installer\Package) point at this file rather than at a URL of their
 # own, so the port is read here, from the same env files the service reads, and a port changed in
 # site.env reaches the shortcuts with the next install.
+function Get-WebUrl {
+  # A node has no web interface of its own: its cameras are seen in the core's.
+  $where = if ($TheRole -eq 'node') { Get-StackValue 'CORE_ADDRESS' } else { 'localhost' }
+  "http://${where}:$(Get-StackValue 'WEB_VMS_PORT')/"
+}
+
 function New-WebShortcut {
-  $url = "http://localhost:$(Get-StackValue 'WEB_VMS_PORT')/"
+  $url = Get-WebUrl
   $lines = '[InternetShortcut]', "URL=$url", "IconFile=$(Join-Path $InstallDir 'ta_vms.ico')", 'IconIndex=0'
   Set-Content -Path (Join-Path $InstallDir 'TreeAlarm VMS.url') -Value $lines -Encoding ASCII
 }
@@ -332,16 +463,21 @@ Start-Transcript -Path (Join-Path $logDir ('install-{0:yyyyMMdd-HHmmss}.log' -f 
 try {
   Write-Host "Installing TreeAlarm VMS: $InstallDir, data in $DataDir"
   New-Item -ItemType Directory -Force (Join-Path $DataDir 'config') | Out-Null
+  $TheRole = Resolve-Role
+  Write-Step "role: $TheRole"
   New-SiteEnv (Join-Path $DataDir 'config\site.env')
   Initialize-DataDirectories
-  Install-Postgres
-  Install-RabbitMq
+  Initialize-Role
+  if ($TheRole -ne 'node') {
+    Install-Postgres
+    Install-RabbitMq
+  }
   Set-FirewallRules
   Install-HostService
   New-WebShortcut
-  Wait-WebInterface
+  if ($TheRole -ne 'node') { Wait-WebInterface }
   Write-Host ''
-  Write-Host "Done. Web UI: http://localhost:$(Get-StackValue 'WEB_VMS_PORT')"
+  Write-Host "Done. Web UI: $(Get-WebUrl)"
   Write-Host "Service logs: $(Join-Path $DataDir 'host-logs')"
   exit 0
 } catch {

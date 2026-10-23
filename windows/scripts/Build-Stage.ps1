@@ -98,9 +98,13 @@ dotnet publish (Join-Path $windows 'TaVmsHost\TaVmsHost.csproj') -c Release -r w
   --nologo -o (Join-Path $Stage 'host')
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish TaVmsHost failed' }
 
-# Dapr and MediaMTX.
+# Dapr and MediaMTX; Sentry and Consul for a deployment over several machines (services.json runs
+# them on a core or a node only). The licence text in Consul's archive is the one in licenses\.
 Expand-Into (Get-Component 'daprd') (Join-Path $Stage 'dapr')
 Expand-Into (Get-Component 'placement') (Join-Path $Stage 'dapr')
+Expand-Into (Get-Component 'sentry') (Join-Path $Stage 'dapr')
+Expand-Into (Get-Component 'consul') (Join-Path $Stage 'consul')
+Remove-Item (Join-Path $Stage 'consul\LICENSE.txt') -ErrorAction SilentlyContinue
 Expand-Into (Get-Component 'mediamtx') (Join-Path $Stage 'mediamtx')
 Copy-Item (Join-Path $repo 'init_files\config\mediamtx.yml') (Join-Path $Stage 'mediamtx\mediamtx.yml') -Force
 
@@ -165,6 +169,11 @@ Remove-Item (Join-Path $Stage 'keycloak\data\tmp') -Recurse -Force -ErrorAction 
 $config = New-Item -ItemType Directory -Force (Join-Path $Stage 'config')
 Copy-Item (Join-Path $repo '.env') (Join-Path $config 'ta_vms.env')
 Copy-Item (Join-Path $windows 'config\windows.env'), (Join-Path $windows 'config\services.json') $config
+# What every role runs has to be in the stage, apps and the rest alike: a missing one would only
+# show on a customer's machine of that role.
+foreach ($infra in (Get-Content (Join-Path $windows 'config\services.json') -Raw | ConvertFrom-Json).infrastructure) {
+  if (-not (Test-Path (Join-Path $Stage $infra.exe))) { throw "services.json names $($infra.exe) ($($infra.name)), which is not staged" }
+}
 $setup = New-Item -ItemType Directory -Force (Join-Path $Stage 'setup')
 Copy-Item (Join-Path $windows 'scripts\Install-TaVms.ps1'), (Join-Path $windows 'scripts\Uninstall-TaVms.ps1'), `
   (Join-Path $windows 'scripts\Stop-TaVms.ps1') $setup

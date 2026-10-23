@@ -49,6 +49,25 @@
     "url": "https://github.com/dapr/dapr/releases/download/v1.18.7/placement_windows_amd64.zip",
     "sha256": "12f737737e19992d2a33fdd10fe5b72c2aa666b2d0886a6c6936c4eea683c41f"
   },
+  // Dapr's certificate authority, run on the core of a deployment over several machines only. The
+  // same release as daprd and placement: the three speak one protocol.
+  "sentry": {
+    "version": "1.18.7",
+    "license": "Apache-2.0",
+    "licenseFile": "licenses\\Dapr.txt",
+    "url": "https://github.com/dapr/dapr/releases/download/v1.18.7/sentry_windows_amd64.zip",
+    "sha256": "9b229124b22724b13f33052932b3e02f47d55caa12c56c88eccffadaddc1f12d"
+  },
+  // How the machines of a deployment over several find each other's app ids: a server on the core,
+  // an agent on every node; a standalone machine runs neither. Business Source License 1.1 since
+  // Consul 1.17: it forbids only offering a product that competes with Consul, which a VMS is not.
+  "consul": {
+    "version": "2.1.0",
+    "license": "BUSL-1.1",
+    "licenseFile": "licenses\\Consul.txt",
+    "url": "https://releases.hashicorp.com/consul/2.1.0/consul_2.1.0_windows_amd64.zip",
+    "sha256": "10d28650868eff28502e541a1df5dc388e6da79f611bd6b6177871c9d02576db"
+  },
   "mediamtx": {
     "version": "1.21.2",
     "license": "MIT",

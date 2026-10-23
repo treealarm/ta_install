@@ -28,7 +28,7 @@ foreach ($name in 'TaVmsHost', 'TaVms.RabbitMQ', 'TaVms.Postgres') {
 # Only the component directories: nothing else in the installation directory runs.
 $root = Resolve-Path $InstallDir -ErrorAction SilentlyContinue
 if ($root) {
-  $prefixes = 'host', 'vms', 'dotnet', 'dapr', 'mediamtx', 'pgsql', 'erlang', 'rabbitmq', 'keycloak', 'jre', 'mt_admin' |
+  $prefixes = 'host', 'vms', 'dotnet', 'dapr', 'consul', 'mediamtx', 'pgsql', 'erlang', 'rabbitmq', 'keycloak', 'jre', 'mt_admin' |
     ForEach-Object { (Join-Path $root.Path $_) + '\' }
   Get-Process | Where-Object {
     $path = $_.Path

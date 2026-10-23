@@ -43,6 +43,55 @@ Uninstalling (Apps and Features, or `ta_vms-setup-x64.exe /uninstall /quiet`) re
 and the services and **keeps the data directory**: the database, the recordings and the passwords.
 Delete `C:\ProgramData\TreeAlarm\VMS` by hand to remove those too.
 
+## Several machines: a core and nodes
+
+One installation is one machine (`standalone`). A deployment can also be spread out: a **core**
+with the infrastructure and the system-wide services, which is a node too, and **nodes**, each with
+its own cameras, recording and ONVIF. Either may be a Windows machine or a Linux one
+(`../README.md`, "Several machines"): a package made on a core of one kind joins a node of the
+other. For now the role is set unattended only:
+
+```
+rem the core; Address is this machine's own, the one the nodes reach it at
+ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=core Address=192.168.1.10
+rem on the core, for a node named "hall": C:\ProgramData\TreeAlarm\VMS\distributed\node-hall.tar.gz
+"C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe" package hall
+powershell Restart-Service TaVmsHost
+rem on the node, with the package copied to a local disk
+ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=node Address=192.168.1.20 NodePackage=C:\Temp\node-hall.tar.gz
+```
+
+The MSI takes the same as `TAVMSROLE`, `TAVMSADDRESS` and `NODEPACKAGE`. A standalone installation
+can become the core by installing over it with `Role=core`; its MediaMTX server in VmsCfg still
+names `127.0.0.1` then, and its host has to be set to the core's address in the web interface. Any
+other change of role takes an uninstall first. An upgrade keeps the role.
+
+- **A node's services carry its name**: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`,
+  `vmsonvif-actors-hall`, `vmslogger-hall`. Its cameras are added in the core's web interface with
+  server `vms-hall`; ONVIF reaches them from the node, their video is published to the core's
+  MediaMTX. A node runs no PostgreSQL, RabbitMQ, web or MediaMTX: it uses the core's.
+- **App ids are found through HashiCorp Consul**, a server on the core and an agent on each node,
+  gossip encrypted with the deployment's key; the agents' HTTP API stays on the loopback.
+- **Sidecars talk over mutual TLS**, with certificates from Dapr Sentry on the core. Sentry signs
+  one for an app id only against a token for it, signed with the core's key; a node's package holds
+  tokens for its own app ids only.
+- **The package is a credential**: the node's tokens, the core's database, broker and MediaMTX
+  passwords, and Consul's key. Move it as you would a password, and delete it once installed.
+- **The address must stay put**: the sidecars register at it and Consul binds to it. Give the core
+  and the nodes static addresses, and keep their clocks right (certificates allow 15 minutes).
+- **Firewall**, made by the installer for the role: on the core PostgreSQL, RabbitMQ, placement
+  (6050), Sentry (6055), Consul (8300, 8301 TCP/UDP) and the sidecars' internal ports (19011–19027);
+  on a node Consul's 8301 and the sidecars' ports. These are open to the local subnet only, so the
+  machines of one deployment have to share one; PostgreSQL lets in that subnet too (`samenet`).
+- **Size**: Consul (196 MB) and Sentry (55 MB) are in every installation; only a core or node runs
+  them.
+- **Not yet across machines**: analytics workers (there are none on Windows anyway) and the Square
+  integration.
+
+`TaVmsHost core <address>`, `package <node>` and `join <package> <address>` are what the installer
+runs; they keep their files in `C:\ProgramData\TreeAlarm\VMS\distributed` (keys readable by
+administrators only), laid out as `data/distributed` is on Linux.
+
 ## What runs
 
 Three Windows services:
@@ -125,7 +174,8 @@ ta_vms build: `gh workflow run windows-installer.yml`.
   rules: web_srv, mt_admin, RTSP, WebRTC media and ONVIF discovery — and RabbitMQ's Erlang
   distribution (25672) and epmd (4369), behind the cookie: the Windows service starts distribution
   before it reads its configuration, and `rabbitmqctl` finds the node by the machine's name.
-- **App ids resolve through Dapr's `sqlite` resolver**, not mDNS as in Docker: every sidecar
+- **App ids resolve through Dapr's `sqlite` resolver** on a standalone machine, not mDNS as in
+  Docker (and through Consul on a core or node, above): every sidecar
   registers at `127.0.0.1` (`DAPR_HOST_IP`) in a file in the data directory. mDNS announced them at
   the machine's LAN address, so calls between services on one machine broke when that address
   changed or the cable was out, and two installations on one LAN would have mixed their app ids.
@@ -143,3 +193,7 @@ which names every bundled component with its licence and the file holding the fu
 components' own where their archives carry one, `licenses\` for the rest, `licenses\vcpkg\` for the
 libraries beside `vms.exe`. `scripts/Build-Stage.ps1` writes it from `versions.json` and fails if a
 named file is missing.
+
+HashiCorp Consul is under the Business Source License 1.1 (`licenses\Consul.txt`) since 1.17. It
+forbids only offering a product that competes with Consul's own; a VMS that runs it to find its
+services does not.

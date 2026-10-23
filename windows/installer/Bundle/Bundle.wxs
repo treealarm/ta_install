@@ -8,6 +8,10 @@
     ta_vms-setup-x64.exe /quiet /norestart [/log <file>] [InstallFolder=<dir>] [StorageFolder=<dir>]
     ta_vms-setup-x64.exe /uninstall /quiet /norestart
   The variable names are case-sensitive. An upgrade keeps both folders as they are.
+  A deployment over several machines, unattended only for now (windows/README.md):
+    ta_vms-setup-x64.exe /quiet /norestart Role=core Address=<this machine's address>
+    ta_vms-setup-x64.exe /quiet /norestart Role=node Address=<this machine's address> NodePackage=<file>
+  An upgrade keeps the role.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
@@ -51,6 +55,9 @@
 
     <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]TreeAlarm VMS" bal:Overridable="yes" />
     <Variable Name="StorageFolder" Type="formatted" Value="[CommonAppDataFolder]TreeAlarm\VMS" bal:Overridable="yes" />
+    <Variable Name="Role" bal:Overridable="yes" />
+    <Variable Name="Address" bal:Overridable="yes" />
+    <Variable Name="NodePackage" bal:Overridable="yes" />
 
     <!-- An upgrade stays where the installation is: where the MSI recorded it, or, coming from the
          Inno Setup installer of 0.1.5 and before, where that one put it. A search that finds
@@ -116,6 +123,9 @@
       <MsiPackage Id="TaVms" SourceFile="$(var.Package.TargetPath)" Cache="remove">
         <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
         <MsiProperty Name="STORAGEPATH" Value="[StorageFolder]" />
+        <MsiProperty Name="TAVMSROLE" Value="[Role]" />
+        <MsiProperty Name="TAVMSADDRESS" Value="[Address]" />
+        <MsiProperty Name="NODEPACKAGE" Value="[NodePackage]" />
       </MsiPackage>
     </Chain>
   </Bundle>
