@@ -49,7 +49,10 @@ the LAN the node answered on Consul's 8301 and the sidecars' 19013–19016 and 1
 Two things for ta_vms, written up there under `docs/future_plans/`: recording here began 96 s after
 the storage was assigned, against ten on the Linux node (`storage-assignment-delay.md`); and the
 Linux core's own VmsFs never subscribed to its topics at all, which TaVmsHost's start order hides on
-Windows (`streaming-subscription-recovery.md`).
+Windows (`streaming-subscription-recovery.md`). Both fixed on 2026-10-24: every subscriber now opens
+its stream again whenever it ends (ta_vms 8519590), and VmsFs no longer caches a failed or
+superseded storage fetch (4734417, with video_srv's side in 8f22563); on the dev stack a new
+assignment then reached the recorder in 2 s.
 
 Taking the node off took 11 minutes, with the console user's game holding the CPU at 99%. Left on
 the box: nothing installed; the data directory of this test's core, which was the standalone
