@@ -8,7 +8,7 @@
     ta_vms-setup-x64.exe /quiet /norestart [/log <file>] [InstallFolder=<dir>] [StorageFolder=<dir>]
     ta_vms-setup-x64.exe /uninstall /quiet /norestart
   The variable names are case-sensitive. An upgrade keeps both folders as they are.
-  A deployment over several machines, unattended only for now (windows/README.md):
+  A deployment over several machines (windows/README.md), in the wizard's Role page or unattended:
     ta_vms-setup-x64.exe /quiet /norestart Role=core Address=<this machine's address>
     ta_vms-setup-x64.exe /quiet /norestart Role=node Address=<this machine's address> NodePackage=<file>
   An upgrade keeps the role.
@@ -46,6 +46,8 @@
         ShowVersion="yes"
         LaunchTarget="[WindowsFolder]explorer.exe"
         LaunchArguments="&quot;[InstallFolder]\TreeAlarm VMS.url&quot;" />
+      <!-- The Role page's address list and file browser (../BAFunctions, built before this). -->
+      <Payload SourceFile="$(var.BAFunctionsDll)" bal:BAFunctions="yes" />
     </BootstrapperApplication>
 
     <!-- Windows 10 1809 / Server 2019: the oldest the bundled runtimes support. -->
@@ -79,7 +81,12 @@
          it runs unelevated, and config is open to administrators only (passwords), so the file
          cannot even be seen from here ("access denied", and the Options page came back on an
          upgrade). Install-TaVms.ps1 creates config and site.env in one step. -->
-    <util:DirectorySearch Path="[CommonAppDataFolder]TreeAlarm\VMS\config" Result="exists" Variable="SiteEnvExists" />
+    <util:DirectorySearch Id="FindSiteEnv" Path="[CommonAppDataFolder]TreeAlarm\VMS\config" Result="exists" Variable="SiteEnvExists" />
+    <!-- The Role page starts on standalone, but only where there is no installation yet: an upgrade
+         must be given no role at all, or a core or a node would be asked to become standalone,
+         which Install-TaVms.ps1 refuses. Role= on the command line wins either way. -->
+    <SetVariable Id="DefaultRole" After="FindSiteEnv" Variable="Role" Value="standalone"
+                 Condition="NOT SiteEnvExists AND NOT Role" />
 
     <util:RegistrySearch Root="HKLM" Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" Value="Bld"
                          Variable="VCRedistBld" Bitness="always64" />

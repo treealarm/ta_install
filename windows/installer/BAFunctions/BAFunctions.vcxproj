@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BAFunctions.dll, the setup wizard's Role page code (BAFunctions.cpp). Built before Bundle.wixproj,
+  with Visual Studio's MSBuild rather than dotnet (which cannot build C++):
+
+    msbuild BAFunctions.vcxproj -restore -p:Configuration=Release -p:Platform=x64
+
+  The WiX packages are native ones, so the project says it restores for "native" (as WiX's own
+  vcxproj do). Their libraries are built against the static CRT, and so is this: the wizard runs
+  before the chain has installed the Visual C++ runtime.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{1B62512C-5A5B-44CE-AD84-9FD9AD330CB2}</ProjectGuid>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <TargetName>BAFunctions</TargetName>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <PropertyGroup>
+    <OutDir>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildProjectDirectory)\obj\$(Configuration)\</IntDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>MinSpace</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+      <ConformanceMode>false</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <ModuleDefinitionFile>BAFunctions.def</ModuleDefinitionFile>
+      <AdditionalDependencies>comctl32.lib;gdiplus.lib;msimg32.lib;shlwapi.lib;wininet.lib;iphlpapi.lib;ws2_32.lib;comdlg32.lib;msi.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="BAFunctions.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="BAFunctions.def" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.WixStandardBootstrapperApplicationFunctionApi" Version="5.0.2" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- WiX 5.0.2's HyperlinkTheme.wxl (Microsoft Reciprocal License), with the strings of Theme.xml's
-     storage folder and what this setup installs. -->
+     storage folder, its Role page and what this setup installs. -->
 <WixLocalization Culture="en-us" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
   <String Id="Caption" Value="[WixBundleName] Setup" />
   <String Id="Title" Value="[WixBundleName]" />
@@ -18,6 +18,13 @@
   <String Id="InstallLicenseLinkText" Value="[WixBundleName] &lt;a href=&quot;#&quot;&gt;license terms&lt;/a&gt;." />
   <String Id="InstallAcceptCheckbox" Value="I &amp;agree to the license terms and conditions" />
   <String Id="InstallOptionsButton" Value="&amp;Options" />
+  <String Id="InstallRoleButton" Value="&amp;Role" />
+  <String Id="RoleHeader" Value="This Computer's Role" />
+  <String Id="RoleStandalone" Value="&amp;Standalone: everything on this computer" />
+  <String Id="RoleCore" Value="&amp;Core of a deployment over several computers" />
+  <String Id="RoleNode" Value="&amp;Node: records cameras for a core on another computer" />
+  <String Id="RoleAddressLabel" Value="This computer's address for the others:" />
+  <String Id="RolePackageLabel" Value="Node package the core made for this computer (node-&lt;name&gt;.tar.gz):" />
   <String Id="InstallInstallButton" Value="&amp;Install" />
   <String Id="InstallCancelButton" Value="&amp;Cancel" />
   <String Id="OptionsHeader" Value="Setup Options" />

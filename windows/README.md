@@ -49,7 +49,12 @@ One installation is one machine (`standalone`). A deployment can also be spread 
 with the infrastructure and the system-wide services, which is a node too, and **nodes**, each with
 its own cameras, recording and ONVIF. Either may be a Windows machine or a Linux one
 (`../README.md`, "Several machines"): a package made on a core of one kind joins a node of the
-other. For now the role is set unattended only:
+other.
+
+In the wizard, **Role** beside Options on the first page offers standalone (the default), core and
+node: a core and a node pick this machine's address from a list of its IPv4 addresses (those of an
+interface with a default gateway first), a node also the package its core made for it. The page is
+not there on an upgrade, which keeps the role. Unattended, the same goes on the command line:
 
 ```
 rem the core; Address is this machine's own, the one the nodes reach it at
@@ -152,8 +157,12 @@ Everything the installer ships is laid out by `scripts/Build-Stage.ps1`, from tw
 runtime installers from `redist\` and then the MSI:
 
 ```
+msbuild installer/BAFunctions/BAFunctions.vcxproj -restore -p:Configuration=Release -p:Platform=x64
 dotnet build installer/Bundle/Bundle.wixproj -c Release -p:StageDir=<stage> -p:Version=<x.y.z>
 ```
+
+`installer/BAFunctions` is the wizard's Role page code (C++, Visual Studio's MSBuild with the C++
+workload: dotnet cannot build it), which the bundle carries.
 
 The scripts do the actual work and run on their own as well (Windows PowerShell 5.1, elevated):
 

@@ -4,18 +4,23 @@
     first. Both from the directory scripts/Build-Stage.ps1 laid out:
 
       dotnet build Bundle.wixproj -c Release -p:StageDir=<stage> -p:Version=<x.y.z>
+
+    after ../BAFunctions/BAFunctions.vcxproj, which dotnet cannot build (C++): see there.
   -->
   <PropertyGroup>
     <OutputType>Bundle</OutputType>
     <OutputName>ta_vms-setup-x64</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
     <Version Condition="'$(Version)' == ''">0.0.0</Version>
-    <DefineConstants>ProductVersion=$(Version);StageDir=$(StageDir)</DefineConstants>
+    <BAFunctionsDll Condition="'$(BAFunctionsDll)' == ''">$(MSBuildThisFileDirectory)..\BAFunctions\bin\Release\BAFunctions.dll</BAFunctionsDll>
+    <DefineConstants>ProductVersion=$(Version);StageDir=$(StageDir);BAFunctionsDll=$(BAFunctionsDll)</DefineConstants>
   </PropertyGroup>
 
   <Target Name="RequireStage" BeforeTargets="BeforeBuild">
     <Error Condition="'$(StageDir)' == '' or !Exists('$(StageDir)\redist\redist.wxi')"
            Text="Pass -p:StageDir=&lt;the directory scripts/Build-Stage.ps1 laid out&gt;." />
+    <Error Condition="!Exists('$(BAFunctionsDll)')"
+           Text="$(BAFunctionsDll) is missing: build ..\BAFunctions\BAFunctions.vcxproj first (see there)." />
   </Target>
 
   <ItemGroup>

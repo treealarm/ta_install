@@ -85,6 +85,15 @@ jobs:
             -Stage (Join-Path $env:RUNNER_TEMP 'stage') `
             -Cache (Join-Path $env:RUNNER_TEMP 'downloads')
 
+      - uses: microsoft/setup-msbuild@v2
+
+      # The wizard's Role page code, which the bundle carries: C++, which dotnet cannot build.
+      - name: Build BAFunctions
+        run: |
+          msbuild windows\installer\BAFunctions\BAFunctions.vcxproj -restore -nologo -v:minimal `
+            -p:Configuration=Release -p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'the BAFunctions build failed' }
+
       # A CI build is numbered after the latest release, so that it upgrades that one: MSI compares
       # three fields only and refuses a downgrade.
       - name: Build setup.exe

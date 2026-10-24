@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- WiX 5.0.2's HyperlinkTheme.xml (Microsoft Reciprocal License), with a second folder on the
-     Options page: where the video archive goes. Options is hidden on an upgrade, which keeps both
-     places as they are (SiteEnvExists, see Bundle.wxs). An Editbox is bound to the bundle variable
-     of its own name. -->
+     Options page: where the video archive goes, and a Role page: standalone, core or node. Both are
+     hidden on an upgrade, which keeps the places and the role as they are (SiteEnvExists, see
+     Bundle.wxs). An Editbox is bound to the bundle variable of its own name, RadioButtons to the
+     one their Name gives. -->
 <Theme xmlns="http://wixtoolset.org/schemas/v4/thmutil">
     <Font Id="0" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
     <Font Id="1" Height="-24" Weight="500" Foreground="windowtext">Segoe UI</Font>
@@ -28,6 +29,10 @@
             <Hypertext Name="EulaHyperlink" X="11" Y="121" Width="-11" Height="51" TabStop="yes" FontId="3" HideWhenDisabled="yes">#(loc.InstallLicenseLinkText)</Hypertext>
             <Checkbox Name="EulaAcceptCheckbox" X="-11" Y="-41" Width="260" Height="17" TabStop="yes" FontId="3" HideWhenDisabled="yes">#(loc.InstallAcceptCheckbox)</Checkbox>
             <Button Name="InstallUpdateButton" X="11" Y="-11" Width="200" Height="23" TabStop="yes" FontId="0" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">#(loc.UpdateButton)</Button>
+            <Button Name="RoleButton" X="-251" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0" VisibleCondition="NOT WixStdBASuppressOptionsUI AND NOT SiteEnvExists">
+                <Text>#(loc.InstallRoleButton)</Text>
+                <ChangePageAction Page="Role" />
+            </Button>
             <Button Name="OptionsButton" X="-171" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0" VisibleCondition="NOT WixStdBASuppressOptionsUI AND NOT SiteEnvExists">
                 <Text>#(loc.InstallOptionsButton)</Text>
                 <ChangePageAction Page="Options" />
@@ -57,6 +62,30 @@
                 <ChangePageAction Page="Install" />
             </Button>
             <Button Name="OptionsCancelButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+                <Text>#(loc.OptionsCancelButton)</Text>
+                <ChangePageAction Page="Install" Cancel="yes" />
+            </Button>
+        </Page>
+        <!-- What this computer is in a deployment. A radio button sets Role at once and redraws the
+             page, so the conditions below follow it. The address list and the Browse button are
+             BAFunctions.dll's (../BAFunctions); OK writes the chosen address to Address there. -->
+        <Page Name="Role">
+            <Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">#(loc.RoleHeader)</Label>
+            <RadioButtons Name="Role">
+                <RadioButton Name="RoleStandalone" Value="standalone" X="11" Y="114" Width="-11" Height="17" TabStop="yes" FontId="3">#(loc.RoleStandalone)</RadioButton>
+                <RadioButton Name="RoleCore" Value="core" X="11" Y="134" Width="-11" Height="17" TabStop="yes" FontId="3">#(loc.RoleCore)</RadioButton>
+                <RadioButton Name="RoleNode" Value="node" X="11" Y="154" Width="-11" Height="17" TabStop="yes" FontId="3">#(loc.RoleNode)</RadioButton>
+            </RadioButtons>
+            <Label X="11" Y="183" Width="180" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;core&quot; OR Role = &quot;node&quot;">#(loc.RoleAddressLabel)</Label>
+            <Combobox Name="AddressList" X="195" Y="180" Width="-11" Height="120" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;core&quot; OR Role = &quot;node&quot;" />
+            <Label X="11" Y="207" Width="-11" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RolePackageLabel)</Label>
+            <Editbox Name="NodePackage" X="11" Y="227" Width="-91" Height="21" TabStop="yes" FontId="3" FileSystemAutoComplete="yes" VisibleCondition="Role = &quot;node&quot;" />
+            <Button Name="NodePackageBrowseButton" X="-11" Y="226" Width="75" Height="23" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;">#(loc.OptionsBrowseButton)</Button>
+            <Button Name="RoleOkButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+                <Text>#(loc.OptionsOkButton)</Text>
+                <ChangePageAction Page="Install" />
+            </Button>
+            <Button Name="RoleCancelButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
                 <Text>#(loc.OptionsCancelButton)</Text>
                 <ChangePageAction Page="Install" Cancel="yes" />
             </Button>
