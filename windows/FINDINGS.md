@@ -3,6 +3,38 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-25, evening: a web on every machine, a MediaMTX on the node
+
+The installer of ta_install ab43dd8 (CI run 40217110528, every job green; ta_vms 8c981d9), on the
+machine below, as a node of a core on the Linux machine next to it, both from that commit. The point:
+an operator opens any machine's web and sees the whole deployment, and a node's cameras' live
+video comes from the node's own MediaMTX.
+
+- `Role=node Address=192.168.1.82 NodePackage=...` (MediaMTX by default): **93 s**. site.env got
+  `KEYCLOAK_URL=http://192.168.1.45:8180` (the core's), an empty `MT_ADMIN_PORT` and
+  `TAVMS_MEDIAMTX=1`; the firewall the web, RTSP, WebRTC media and "MediaMTX API and WHEP". Six
+  services healthy in the core's Consul, `web-vms-nhu` among them.
+- **Everything below went through the node's web** (`192.168.1.82:5134`), logged in at the core's
+  Keycloak: the node's MediaMTX added with the shared one's accounts, OnvifSim's map pair added on
+  `vms-nhu` and its plan pair on the core's `vms`. VmsCfg gave the node's cameras the node's
+  MediaMTX and the core's the shared one, with no choice made in the request.
+- Both webs list the same four cameras. **Live video** (aiortc as the browser, 6–8 s each): the
+  node's camera through either web came from `192.168.1.82:8189`, the node's MediaMTX; the core's
+  camera from the core's. The first offer after a stream went idle got the documented 503 ("stream is
+  still starting, retry"), which the player retries.
+- **The archive across**: each web lists both cameras' clips, and plays a clip of the other
+  machine's camera (an fMP4 segment through `/api/arch/hls`). **PTZ across**: each web turned the
+  other machine's PTZ to the requested position. **Edge import** through the node's web filled a
+  63.6 s hole from the camera's card.
+- From the LAN the node now answers on its web (5134), MediaMTX (8554, 8889, 9997) and the web's
+  sidecar (19011) besides Consul and the other sidecars. MediaMTX also listened on **8892**: MoQ
+  (Media over QUIC, reading and publishing on 8892/8893), on by default in newer MediaMTX. Now off
+  (`MTX_MOQ=no`) in services.json and the distributed compose; checked on both machines, live video
+  unchanged. The standalone compose publishes only the ports it names, so 8892 never left it.
+
+Not tried here: a node with `NodeMediaMtx=0` (TaVmsHost.Tests covers what it runs) and the
+checkbox on the wizard's Role page (the install was unattended).
+
 ## 2026-10-25: the same machine as a node of a Linux core, Consul's key off the command line
 
 The installer of ta_install 919163d (CI run 40204151038, whose `core` job passed; ta_vms 8f22563),

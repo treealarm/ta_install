@@ -53,7 +53,8 @@ other.
 
 In the wizard, **Role** beside Options on the first page offers standalone (the default), core and
 node: a core and a node pick this machine's address from a list of its IPv4 addresses (those of an
-interface with a default gateway first), a node also the package its core made for it. The page is
+interface with a default gateway first), a node also the package its core made for it and whether
+it runs a MediaMTX of its own (checked by default; unattended, `NodeMediaMtx=0` for none). The page is
 not there on an upgrade, which keeps the role. Unattended, the same goes on the command line:
 
 ```
@@ -66,17 +67,23 @@ rem on the node, with the package copied to a local disk
 ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=node Address=192.168.1.20 NodePackage=C:\Temp\node-hall.tar.gz
 ```
 
-The MSI takes the same as `TAVMSROLE`, `TAVMSADDRESS` and `NODEPACKAGE`. A standalone installation
+The MSI takes the same as `TAVMSROLE`, `TAVMSADDRESS`, `NODEPACKAGE` and `NODEMEDIAMTX`. A standalone installation
 can become the core by installing over it with `Role=core`; its MediaMTX server in VmsCfg still
 names `127.0.0.1` then, and its host has to be set to the core's address in the web interface. Any
 other change of role takes an uninstall first. An upgrade keeps the role.
 
 - **A node's services carry its name**: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`,
-  `vmsonvif-actors-hall`, `vmslogger-hall`. Its cameras are added in the core's web interface with
-  server `vms-hall`; ONVIF reaches them from the node, their video is published to the core's
-  MediaMTX. A node runs no PostgreSQL, RabbitMQ, web or MediaMTX: it uses the core's.
+  `vmsonvif-actors-hall`, `vmslogger-hall`, `web-vms-hall`. Its cameras are added with server
+  `vms-hall`; ONVIF reaches them from the node. A node runs no PostgreSQL, RabbitMQ or Keycloak: it
+  uses the core's.
+- **Every machine has the web interface**, and each shows the whole deployment; users log in at the
+  core's Keycloak. User administration is on the core only.
+- **A node's MediaMTX** keeps its cameras' live video on the node: add it once in the web
+  interface (Administration → MediaMTX: host = the node's address, node = `vms-hall`; the accounts
+  come filled in from the shared one), and the node's new cameras publish to it. A node installed
+  without one publishes to the core's.
 - **A node's cameras record to a storage on that node.** None is assigned to them by default: add
-  one in the core's web interface with a path on the node's own disk
+  one in the web interface with a path on the node's own disk
   (`C:\ProgramData\TreeAlarm\VMS\media_storage` on Windows, `/data/media_storage` on a Linux node)
   and assign it to the node's cameras.
 - **App ids are found through HashiCorp Consul**, a server on the core and an agent on each node,
@@ -84,13 +91,15 @@ other change of role takes an uninstall first. An upgrade keeps the role.
 - **Sidecars talk over mutual TLS**, with certificates from Dapr Sentry on the core. Sentry signs
   one for an app id only against a token for it, signed with the core's key; a node's package holds
   tokens for its own app ids only.
-- **The package is a credential**: the node's tokens, the core's database, broker and MediaMTX
-  passwords, and Consul's key. Move it as you would a password, and delete it once installed.
+- **The package is a credential**: the node's tokens, the core's database, broker, MediaMTX and
+  Keycloak passwords, the live-video session key, and Consul's key. Move it as you would a password, and delete it once installed.
 - **The address must stay put**: the sidecars register at it and Consul binds to it. Give the core
   and the nodes static addresses, and keep their clocks right (certificates allow 15 minutes).
-- **Firewall**, made by the installer for the role: on the core PostgreSQL, RabbitMQ, placement
-  (6050), Sentry (6055), Consul (8300, 8301 TCP/UDP) and the sidecars' internal ports (19011–19027);
-  on a node Consul's 8301 and the sidecars' ports. These are open to the local subnet only, so the
+- **Firewall**, made by the installer for the role: everywhere the web, and where MediaMTX runs its
+  RTSP and WebRTC media; on the core PostgreSQL, RabbitMQ, Keycloak, placement (6050), Sentry
+  (6055), Consul (8300, 8301 TCP/UDP) and the sidecars' internal ports (19011–19027); on a node
+  Consul's 8301 and the sidecars' ports; and wherever MediaMTX runs, its API and WHEP (9997,
+  8889). Those for the other machines are open to the local subnet only, so the
   machines of one deployment have to share one; PostgreSQL lets in that subnet too (`samenet`).
 - **Size**: Consul (196 MB) and Sentry (55 MB) are in every installation; only a core or node runs
   them.

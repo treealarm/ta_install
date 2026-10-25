@@ -166,13 +166,22 @@ scripts/distributed.sh package hall           # a node named "hall" -> data/dist
 scripts/distributed.sh up -d                  # the core's services learn the node
 
 # on the node, with this repository and the package copied over
-scripts/distributed.sh join node-hall.tar.gz 192.168.1.20
+scripts/distributed.sh join node-hall.tar.gz 192.168.1.20    # --no-mediamtx: no MediaMTX here
 scripts/distributed.sh up -d
 ```
 
 A node's services carry its name: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`, `vmsonvif-actors-hall`,
-`vmslogger-hall`. Its cameras are added in the web UI on the core with server `vms-hall`; ONVIF
-reaches them from the node, and their video is published to the core's MediaMTX.
+`vmslogger-hall`, `web-vms-hall`. **Every machine has the web UI**, and each shows the whole
+deployment: open whichever is nearest; users log in at the core's Keycloak. User administration
+(mt_admin) is on the core only. A node's cameras are added with server `vms-hall`; ONVIF reaches
+them from the node.
+
+**A node runs its own MediaMTX** unless joined with `--no-mediamtx`, so that its cameras' live video
+goes from the node to the browser rather than through the core. For that, add it in the web UI once
+(Administration → MediaMTX: host = the node's address, node = `vms-hall`; the accounts are filled in
+from the shared one). VmsCfg then gives the node's new cameras the node's MediaMTX; a camera added
+before keeps the one it had until you change it. Without a MediaMTX of its own, a node's cameras
+publish to the core's.
 
 - **Every container runs in the host's network**, with a port of its own per sidecar, as on
   Windows. Apps and the sidecars' API listen on the loopback; what other machines reach is each
@@ -183,16 +192,18 @@ reaches them from the node, and their video is published to the core's MediaMTX.
   certificate for an app id only against a token for it, signed with the core's key; a node gets
   tokens for its own app ids only, in its package.
 - **The package is a credential**: it holds the node's tokens, the core's shared values (the
-  credentials and ports of its PostgreSQL, RabbitMQ and MediaMTX) and Consul's gossip key. Move it
+  credentials and ports of its PostgreSQL, RabbitMQ, MediaMTX and Keycloak, and the key every web
+  seals live-video sessions with) and Consul's gossip key. Move it
   the way you would move a password. Everything else a node runs with comes from its own `.env`.
 - **Firewall on the core**: let the nodes reach PostgreSQL (`POSTGRES_PORT`), RabbitMQ
-  (`RABBITMQ_PORT`), Dapr placement (6050) and Sentry (6055), Consul (8300, 8301 TCP/UDP),
-  MediaMTX (RTSP 8554) and the sidecars' internal ports (19011–19027); browsers need web, mt_admin
-  and MediaMTX's WebRTC (8189/UDP). On a node: the core needs Consul (8301 TCP/UDP) and the
-  sidecars' internal ports. With `network_mode: host` Docker publishes nothing itself, so ufw or
-  nftables rules apply as written.
+  (`RABBITMQ_PORT`), Keycloak (`KEYCLOAK_PORT`), Dapr placement (6050) and Sentry (6055), Consul
+  (8300, 8301 TCP/UDP), MediaMTX (RTSP 8554, API 9997, WHEP 8889) and the sidecars' internal ports
+  (19011–19027); browsers need web, mt_admin and MediaMTX's WebRTC (8189/UDP). On a node: the other
+  machines need Consul (8301 TCP/UDP), the sidecars' internal ports and, with its MediaMTX, its API
+  and WHEP (9997, 8889); browsers need web and, with its MediaMTX, 8189/UDP. With
+  `network_mode: host` Docker publishes nothing itself, so ufw or nftables rules apply as written.
 - **Not yet in a distributed deployment**: the Square integration, the analytics worker and roitrc
-  (`ta_vms/docs/future_plans/`), and MediaMTX on the nodes.
+  (`ta_vms/docs/future_plans/`).
 
 ## Building and publishing images
 
