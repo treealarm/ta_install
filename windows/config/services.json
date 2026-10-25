@@ -89,17 +89,19 @@
       "readyAddress": "${DAPR_HOST_IP}"
     },
     {
+      // On every machine, but a node may go without it (TAVMS_MEDIAMTX=0, windows.env): then its
+      // cameras publish to the core's.
       "name": "mediamtx",
-      "roles": ["standalone", "core"],
+      "when": "${TAVMS_MEDIAMTX}",
       "exe": "mediamtx\\mediamtx.exe",
       "args": ["${TAVMS_HOME}\\mediamtx\\mediamtx.yml"],
       "env": {
-        // The same yml as Docker. Passwords as in ta_install's compose; the rest keeps the Control
-        // API and WHEP (behind web_srv), which only processes on this machine use, on DAPR_HOST_IP
-        // — the loopback on one machine; on a core the address VmsCfg's MediaMTX row names
-        // (VMS_MTX_HOST), since nodes publish to the same server — and turns off what nothing
-        // uses at all, so that MediaMTX cannot fail to start because some other program on the
-        // machine already holds 1935, 8888 or 8890.
+        // The same yml as Docker. Passwords as in ta_install's compose — on a node the core's, which
+        // come in its package, so that one set of accounts serves every MediaMTX of a deployment.
+        // The Control API and WHEP are on DAPR_HOST_IP: the loopback on one machine; over several,
+        // the address VmsCfg's MediaMTX row names, since VmsUtils and every machine's web reach them
+        // there. What nothing uses at all is off, so that MediaMTX cannot fail to start because
+        // some other program on the machine already holds 1935, 8888 or 8890.
         "MTX_AUTHINTERNALUSERS_0_PASS": "${VMS_MEDIAMTX_PUBLISH_PASS}",
         "MTX_AUTHINTERNALUSERS_1_PASS": "${VMS_MEDIAMTX_READ_PASS}",
         "MTX_APIADDRESS": "${DAPR_HOST_IP}:9997",
@@ -114,7 +116,8 @@
     {
       // Users and login. Built for PostgreSQL when the installer was made (Build-Stage.ps1 runs
       // `kc build`), so it starts --optimized; the realm is imported from keycloak\data\import on
-      // the first start and left alone afterwards. Only web-vms talks to it, on the loopback.
+      // the first start and left alone afterwards. Only web-vms talks to it: on the loopback on one
+      // machine, at the core's address over several, where every machine's web logs users in.
       "name": "keycloak",
       "roles": ["standalone", "core"],
       "exe": "keycloak\\bin\\kc.bat",
@@ -125,7 +128,7 @@
         "KC_DB_USERNAME": "${POSTGRES_USER}",
         "KC_DB_PASSWORD": "${POSTGRES_PASSWORD}",
         "KC_HTTP_ENABLED": "true",
-        "KC_HTTP_HOST": "127.0.0.1",
+        "KC_HTTP_HOST": "${DAPR_HOST_IP}",
         "KC_HTTP_PORT": "${KEYCLOAK_PORT}",
         "KC_HOSTNAME_STRICT": "false",
         // One server: a local cache. The default clusters through JGroups and listens for other
@@ -184,7 +187,9 @@
       "daprHttpPort": 3616, "daprGrpcPort": 41017, "daprInternalGrpcPort": 19027, "metricsPort": 9206, "placement": true },
     { "appId": "vms${TAVMS_NODE_SUFFIX}", "exe": "vms\\vms.exe", "protocol": "grpc", "appPort": "${GRPC_VMS_PORT}",
       "daprHttpPort": 3607, "daprGrpcPort": 41008, "daprInternalGrpcPort": 19018, "metricsPort": 9197, "placement": false },
-    { "appId": "web-vms", "roles": ["standalone", "core"], "exe": "dotnet\\web_srv.Server\\web_srv.Server.exe", "protocol": "http", "appPort": "${WEB_VMS_PORT}",
+    // On every machine: an operator opens any of them and sees the whole deployment. Nothing calls
+    // it by app id; a node's carries its name like the rest of the node's.
+    { "appId": "web-vms${TAVMS_NODE_SUFFIX}", "exe": "dotnet\\web_srv.Server\\web_srv.Server.exe", "protocol": "http", "appPort": "${WEB_VMS_PORT}",
       "daprHttpPort": 3600, "daprGrpcPort": 41001, "daprInternalGrpcPort": 19011, "metricsPort": 9190, "placement": false }
   ]
 }

@@ -11,7 +11,8 @@
 //                                      installer scripts, so that only one parser reads env files)
 //   TaVmsHost core <address>           make this machine the core of a deployment over several
 //   TaVmsHost package <node>           machines, make a node's package on the core, join a node
-//   TaVmsHost join <package> <address> with it (Distributed.cs; the installer runs core and join)
+//   TaVmsHost join <package> <address> with it (Distributed.cs; the installer runs core and join);
+//     [--no-mediamtx]                  a node whose cameras publish to the core's MediaMTX
 //
 // The installation lives in the directory above this executable (<home>\host\TaVmsHost.exe); its
 // data in --data, %ProgramData%\TreeAlarm\VMS unless told otherwise.
@@ -50,13 +51,15 @@ switch (positional)
   case ["package", var node]:
     return RunDistributed(home, data, c => Distributed.Package(c, node, Console.Out));
   case ["join", var package, var address]:
-    return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), Console.Out));
+    return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: true, Console.Out));
+  case ["join", var package, var address, "--no-mediamtx"]:
+    return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: false, Console.Out));
   case ["send-ctrl-c", var pid] when OperatingSystem.IsWindows():
     // Internal: see Native.SendCtrlC.
     Native.SendCtrlC(int.Parse(pid, System.Globalization.CultureInfo.InvariantCulture));
     return 0;
   default:
-    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | package <node> | join <package> <address>   [--data <dir>]");
+    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | package <node> | join <package> <address> [--no-mediamtx]   [--data <dir>]");
     return 2;
 }
 

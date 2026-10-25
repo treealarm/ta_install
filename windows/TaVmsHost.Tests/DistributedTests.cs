@@ -25,7 +25,7 @@ public sealed class DistributedTests : IDisposable
     var package = Distributed.Package(_core.Load(), "hall", TextWriter.Null);
     // A node's site.env is the installer's header and storage paths only: its passwords are the core's.
     File.WriteAllLines(_node.SiteEnv, ["# site.env of a node"]);
-    Distributed.Join(_node.Load(), package, NodeAddress, TextWriter.Null);
+    Distributed.Join(_node.Load(), package, NodeAddress, mediaMtx: true, TextWriter.Null);
   }
 
   public void Dispose()
@@ -76,12 +76,12 @@ public sealed class DistributedTests : IDisposable
   }
 
   [Fact]
-  public void A_node_runs_its_five_services_under_its_name()
+  public void A_node_runs_its_services_and_a_web_under_its_name()
   {
     var config = _node.Load();
     Assert.Equal(Role.Node, config.Role);
-    Assert.Equal(["consul-agent"], config.Manifest.Infrastructure.Select(i => i.Name));
-    Assert.Equal(["vmslogger-hall", "vmsfs-hall", "vmsonvif-hall", "vmsonvif-actors-hall", "vms-hall"],
+    Assert.Equal(["consul-agent", "mediamtx"], config.Manifest.Infrastructure.Select(i => i.Name));
+    Assert.Equal(["vmslogger-hall", "vmsfs-hall", "vmsonvif-hall", "vmsonvif-actors-hall", "vms-hall", "web-vms-hall"],
       config.Manifest.Apps.Select(a => a.AppId));
     Assert.Equal("vms-hall", config.App(App(config, "vmsonvif-actors-hall")).Env["OWN_SERVER_ID"]);
     Assert.Equal("vms-hall.dapr", App(config, "vms-hall").SidecarName);
@@ -139,7 +139,7 @@ public sealed class DistributedTests : IDisposable
   public void A_node_holds_tokens_for_its_own_app_ids_only()
   {
     var tokens = Directory.GetFiles(Path.Combine(_node.Load().DistributedDir, "tokens")).Select(Path.GetFileName).Order();
-    Assert.Equal(["vms-hall.token", "vmsfs-hall.token", "vmslogger-hall.token", "vmsonvif-actors-hall.token", "vmsonvif-hall.token"], tokens);
+    Assert.Equal(["vms-hall.token", "vmsfs-hall.token", "vmslogger-hall.token", "vmsonvif-actors-hall.token", "vmsonvif-hall.token", "web-vms-hall.token"], tokens);
     Assert.False(Directory.Exists(Path.Combine(_node.Load().DistributedDir, "core")));
   }
 
@@ -218,6 +218,34 @@ public sealed class DistributedTests : IDisposable
   }
 
   [Fact]
+  public void Every_machine_logs_users_in_at_the_cores_keycloak()
+  {
+    var core = _core.Load();
+    var keycloak = core.Infra(Infra(core, "keycloak"));
+    Assert.Equal(CoreAddress, keycloak.Env["KC_HTTP_HOST"]);
+    var url = $"http://{CoreAddress}:{core.Env["KEYCLOAK_PORT"]}";
+    Assert.Equal(url, core.App(App(core, "web-vms")).Env["KEYCLOAK_URL"]);
+
+    var node = _node.Load();
+    var web = node.App(App(node, "web-vms-hall"));
+    Assert.Equal(url, web.Env["KEYCLOAK_URL"]);
+    foreach (var key in new[] { "KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_CLIENT_ID", "VMS_WHEP_SESSION_KEY" })
+      Assert.Equal(core.Env[key], web.Env[key]);
+    // User administration is the core's: no link to it from a node's web.
+    Assert.Equal("", web.Env["MT_ADMIN_PORT"]);
+  }
+
+  [Fact]
+  public void A_node_joined_without_mediamtx_runs_none()
+  {
+    using var other = new Installation();
+    File.WriteAllLines(other.SiteEnv, ["# a node"]);
+    var package = Distributed.Package(_core.Load(), "yard", TextWriter.Null);
+    Distributed.Join(other.Load(), package, NodeAddress, mediaMtx: false, TextWriter.Null);
+    Assert.Equal(["consul-agent"], other.Load().Manifest.Infrastructure.Select(i => i.Name));
+  }
+
+  [Fact]
   public void A_node_without_its_consul_configuration_does_not_start()
   {
     File.Delete(_node.Load().ConsulConfigPath);
@@ -230,7 +258,7 @@ public sealed class DistributedTests : IDisposable
   {
     Assert.Throws<InvalidOperationException>(() => Distributed.Core(_core.Load(), CoreAddress, TextWriter.Null));
     var package = Path.Combine(_core.Load().DistributedDir, "node-hall.tar.gz");
-    Assert.Throws<InvalidOperationException>(() => Distributed.Join(_node.Load(), package, NodeAddress, TextWriter.Null));
+    Assert.Throws<InvalidOperationException>(() => Distributed.Join(_node.Load(), package, NodeAddress, mediaMtx: true, TextWriter.Null));
     Assert.Throws<InvalidOperationException>(() => Distributed.Package(_node.Load(), "yard", TextWriter.Null));
     Assert.Throws<ArgumentException>(() => Distributed.Core(new Installation().Load(), "127.0.0.1", TextWriter.Null));
   }
@@ -247,7 +275,7 @@ public sealed class DistributedTests : IDisposable
       tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "name") { DataStream = new MemoryStream("yard\n"u8.ToArray()) });
       tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "tokens/../../config/site.env") { DataStream = new MemoryStream("X=1"u8.ToArray()) });
     }
-    Assert.Throws<InvalidDataException>(() => Distributed.Join(other.Load(), hostile, NodeAddress, TextWriter.Null));
+    Assert.Throws<InvalidDataException>(() => Distributed.Join(other.Load(), hostile, NodeAddress, mediaMtx: true, TextWriter.Null));
     Assert.False(Directory.Exists(other.Load().DistributedDir));
   }
 
@@ -269,18 +297,22 @@ public sealed class DistributedTests : IDisposable
       Add("./shared.env", shared);
       Add("./nodes", "vms-yard:vmsfs-yard:vmsonvif-yard:vmslogger-yard\n");
       Add("./core.env", "POSTGRES_PORT=5432\nPOSTGRES_USER=postgres\nPOSTGRES_PASSWORD=\"lin pass\"\nPOSTGRES_STATE_DB=ta_state\n" +
-        "POSTGRES_FS_DB=ta_fs\nRABBITMQ_PORT=5674\nRABBITMQ_DEFAULT_USER=vms\nRABBITMQ_DEFAULT_PASS=rq\n");
+        "POSTGRES_FS_DB=ta_fs\nRABBITMQ_PORT=5674\nRABBITMQ_DEFAULT_USER=vms\nRABBITMQ_DEFAULT_PASS=rq\n" +
+        "KEYCLOAK_PORT=8180\nKEYCLOAK_ADMIN_USER=admin\nKEYCLOAK_ADMIN_PASSWORD=kc\nKEYCLOAK_REALM_NAME=tavms\n" +
+        "KEYCLOAK_CLIENT_ID=pubclient\nVMS_WHEP_SESSION_KEY=k\n");
       Add("./name", "yard\n");
       tar.WriteEntry(new GnuTarEntry(TarEntryType.Directory, "./tokens/"));
-      foreach (var app in new[] { "vms", "vmsfs", "vmsonvif", "vmsonvif-actors", "vmslogger" })
+      foreach (var app in new[] { "vms", "vmsfs", "vmsonvif", "vmsonvif-actors", "vmslogger", "web-vms" })
         Add($"./tokens/{app}-yard.token", "eyJ.eyJ.sig");
     }
     File.WriteAllLines(other.SiteEnv, ["# a node"]);
-    Distributed.Join(other.Load(), linux, NodeAddress, TextWriter.Null);
+    Distributed.Join(other.Load(), linux, NodeAddress, mediaMtx: true, TextWriter.Null);
 
     var config = other.Load();
     Assert.Equal("lin pass", config.Env["POSTGRES_PASSWORD"]);
     Assert.Equal("5674", config.Env["RABBITMQ_PORT"]);
+    // A Linux core's Keycloak is on its own port, not this machine's.
+    Assert.Equal($"http://{CoreAddress}:8180", config.Env["KEYCLOAK_URL"]);
     Assert.Equal("vms-yard", config.App(App(config, "vmsonvif-yard")).Env["OWN_SERVER_ID"]);
   }
 

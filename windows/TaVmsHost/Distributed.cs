@@ -13,7 +13,8 @@ namespace TaVmsHost;
 //   TaVmsHost core <address>          make this machine the core: root of trust, Sentry's issuer and
 //                                     configuration, the key that signs tokens, Consul's gossip key
 //   TaVmsHost package <node>          on the core: <data>\distributed\node-<node>.tar.gz
-//   TaVmsHost join <package> <address> on a node
+//   TaVmsHost join <package> <address> [--no-mediamtx]
+//                                     on a node; without MediaMTX its cameras publish to the core's
 //
 //   core\           root.key, jwt.key: the core's secrets, closed to the service account
 //   sentry\         ca.crt, issuer.crt, issuer.key, config.yaml: what Sentry runs on (core)
@@ -73,6 +74,8 @@ internal static class Distributed
       ("DAPR_HOST_IP", ip),
       // Where the MediaMTX row VmsCfg seeds sends every node's video.
       ("VMS_MTX_HOST", ip),
+      // Keycloak listens on this address (services.json), where every machine's web logs users in.
+      ("KEYCLOAK_URL", KeycloakUrl(ip, config.Require("KEYCLOAK_PORT"))),
     ]);
     output.WriteLine($"This machine is the core at {ip}: {dir}");
     output.WriteLine("If it ran as a standalone installation before, the MediaMTX server VmsCfg created then still");
@@ -117,7 +120,7 @@ internal static class Distributed
     return path;
   }
 
-  public static void Join(StackConfig config, string packagePath, string address, TextWriter output)
+  public static void Join(StackConfig config, string packagePath, string address, bool mediaMtx, TextWriter output)
   {
     var ip = RequireAddress(address);
     var dir = config.DistributedDir;
@@ -159,10 +162,19 @@ internal static class Distributed
       ("POSTGRES_HOST", shared["CORE_ADDRESS"]),
       ("RABBITMQ_HOST", shared["CORE_ADDRESS"]),
       ("VMS_MTX_HOST", shared["CORE_ADDRESS"]),
+      ("KEYCLOAK_URL", KeycloakUrl(shared["CORE_ADDRESS"], core["KEYCLOAK_PORT"])),
+      // User administration (mt_admin) runs on the core only: this machine's web offers no link to it.
+      ("MT_ADMIN_PORT", ""),
+      // services.json "when" of mediamtx.
+      ("TAVMS_MEDIAMTX", mediaMtx ? "1" : "0"),
     ]);
     output.WriteLine($"This machine is node '{name}' of the core at {shared["CORE_ADDRESS"]}: {dir}");
-    output.WriteLine($"Its cameras are added in the core's web interface with server vms-{name}.");
+    output.WriteLine($"Its cameras are added in the web interface with server vms-{name}.");
+    if (mediaMtx)
+      output.WriteLine($"For their video to stay on this machine, add its MediaMTX there too (Administration, MediaMTX: host {ip}, node vms-{name}).");
   }
+
+  private static string KeycloakUrl(string host, string port) => $"http://{host}:{port}";
 
   private static string RequireAddress(string address) =>
     IPAddress.TryParse(address, out var ip) && ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip)

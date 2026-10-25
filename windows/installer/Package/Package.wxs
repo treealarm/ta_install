@@ -52,11 +52,12 @@
          site.env exists, so an upgrade keeps the path it was given the first time. -->
     <SetProperty Id="STORAGEPATH" Value="[DATADIR]" After="SetDATADIR" Sequence="both" Condition="NOT STORAGEPATH" />
     <!-- What this machine is in a deployment over several (Install-TaVms.ps1 -Role, -Address,
-         -NodePackage). Empty on an upgrade: the role is kept in site.env. Secure, so that they reach
-         the elevated part of the installation from the command line or the bundle. -->
+         -NodePackage, -NodeMediaMtx). Empty on an upgrade: the role is kept in site.env. Secure, so
+         that they reach the elevated part of the installation from the command line or the bundle. -->
     <Property Id="TAVMSROLE" Secure="yes" />
     <Property Id="TAVMSADDRESS" Secure="yes" />
     <Property Id="NODEPACKAGE" Secure="yes" />
+    <Property Id="NODEMEDIAMTX" Secure="yes" />
 
     <!-- The Inno Setup installation of 0.1.5 and before, which this replaces (see
          TaVmsRemoveInno). Inno wrote its uninstall key into the 64-bit view. -->
@@ -111,7 +112,7 @@
       Execute="deferred"
       Impersonate="no"
       Return="check"
-      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Install-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot; -StoragePath &quot;[STORAGEPATH].&quot; -Role &quot;[TAVMSROLE]&quot; -Address &quot;[TAVMSADDRESS]&quot; -NodePackage &quot;[NODEPACKAGE]&quot;" />
+      ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Install-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot; -StoragePath &quot;[STORAGEPATH].&quot; -Role &quot;[TAVMSROLE]&quot; -Address &quot;[TAVMSADDRESS]&quot; -NodePackage &quot;[NODEPACKAGE]&quot; -NodeMediaMtx &quot;[NODEMEDIAMTX]&quot;" />
     <!-- A first install whose set-up failed takes its services with it; an upgrade's are the old
          version's, which the rollback restores. -->
     <CustomAction

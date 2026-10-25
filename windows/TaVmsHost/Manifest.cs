@@ -8,7 +8,8 @@ namespace TaVmsHost;
 //
 // Strings may use ${NAME} from the merged environment (EnvFile.Expand), so an application's port is
 // written once, in .env, and both the application and its sidecar read it from there. An entry
-// with "roles" runs only on a machine of one of those roles (Role); one without runs on all.
+// with "roles" runs only on a machine of one of those roles (Role); one without runs on all. An
+// infrastructure entry with "when" runs only where that expands to 1 (0: not on this machine).
 internal sealed record Manifest(
   IReadOnlyList<InfraProcess> Infrastructure,
   IReadOnlyList<DaprApp> Apps)
@@ -45,7 +46,7 @@ internal sealed record Manifest(
   // Names are unique per role: two entries may share one when no role runs both.
   public Manifest ForRole(Role role, IReadOnlyDictionary<string, string> env)
   {
-    var infra = Infrastructure.Where(i => RunsOn(i.Roles, role)).ToList();
+    var infra = Infrastructure.Where(i => RunsOn(i.Roles, role) && Wanted(i, env)).ToList();
     var apps = Apps.Where(a => RunsOn(a.Roles, role))
       .Select(a => a with { AppId = EnvFile.Expand(a.AppId, env, $"services.json {a.AppId}.appId") })
       .ToList();
@@ -61,6 +62,14 @@ internal sealed record Manifest(
 
   private static bool RunsOn(IReadOnlyList<string>? roles, Role role) =>
     roles is null || roles.Contains(role.Name());
+
+  private static bool Wanted(InfraProcess p, IReadOnlyDictionary<string, string> env) =>
+    p.When is null || EnvFile.Expand(p.When, env, $"services.json {p.Name}.when") switch
+    {
+      "1" => true,
+      "0" => false,
+      var other => throw new FormatException($"services.json {p.Name}.when: '{other}' is neither 1 nor 0"),
+    };
 }
 
 // placement, MediaMTX, Keycloak, Consul, Sentry: no sidecar. The next process starts once
@@ -74,7 +83,8 @@ internal sealed record InfraProcess(
   IReadOnlyDictionary<string, string>? Env,
   string? ReadyPort,
   string? ReadyAddress,
-  IReadOnlyList<string>? Roles);
+  IReadOnlyList<string>? Roles,
+  string? When);
 
 internal sealed record DaprApp(
   string AppId,

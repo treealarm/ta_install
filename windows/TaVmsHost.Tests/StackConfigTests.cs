@@ -162,6 +162,9 @@ public sealed class StackConfigTests : IDisposable
     Assert.Equal(Role.Standalone, config.Role);
     Assert.Equal(["placement", "mediamtx", "keycloak", "mt_admin"], config.Manifest.Infrastructure.Select(i => i.Name));
     Assert.Equal("127.0.0.1", config.Infra(config.Manifest.Infrastructure[0]).Args[3]);
+    // Keycloak and MediaMTX's API on the loopback: web_srv and VmsUtils are on this machine.
+    Assert.Equal("127.0.0.1", config.Infra(config.Manifest.Infrastructure.Single(i => i.Name == "keycloak")).Env["KC_HTTP_HOST"]);
+    Assert.Equal("127.0.0.1:9997", config.Infra(config.Manifest.Infrastructure.Single(i => i.Name == "mediamtx")).Env["MTX_APIADDRESS"]);
     foreach (var app in config.Manifest.Apps)
     {
       var sidecar = config.Sidecar(app);

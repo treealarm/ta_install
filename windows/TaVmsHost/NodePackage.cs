@@ -9,7 +9,7 @@ namespace TaVmsHost;
 //
 //   shared.env           CORE_ADDRESS, CONSUL_ENCRYPT, DAPR_TRUST_ANCHORS
 //   nodes                every node's pair for MEDIA_SERVER_PAIRS, one per line
-//   core.env             the core's database, broker and MediaMTX credentials (CoreKeys)
+//   core.env             the core's database, broker, MediaMTX and Keycloak credentials (CoreKeys)
 //   name                 the node's name
 //   tokens/<app>.token   a Sentry token for each of the node's app ids, and for nothing else
 //
@@ -23,14 +23,17 @@ internal static partial class NodePackage
   // What a node takes from its core, the same list distributed.sh's CORE_KEYS names: everything
   // else is the same in every release, or belongs to the machine (paths, hosts) — and a Windows
   // core's would be Windows paths, of no use to a node on Linux.
-  [GeneratedRegex(@"^(POSTGRES_(PORT|USER|PASSWORD)|POSTGRES_[A-Z0-9_]+_DB|RABBITMQ_(PORT|DEFAULT_USER|DEFAULT_PASS)|VMS_MEDIAMTX_(PUBLISH|READ)_(USER|PASS))$")]
+  [GeneratedRegex(@"^(POSTGRES_(PORT|USER|PASSWORD)|POSTGRES_[A-Z0-9_]+_DB|RABBITMQ_(PORT|DEFAULT_USER|DEFAULT_PASS)|VMS_MEDIAMTX_(PUBLISH|READ)_(USER|PASS)|KEYCLOAK_(PORT|ADMIN_USER|ADMIN_PASSWORD|REALM_NAME|CLIENT_ID)|VMS_WHEP_SESSION_KEY)$")]
   public static partial Regex CoreKeys();
 
-  // Required in core.env: a node cannot reach the core's services without them.
+  // Required in core.env: a node cannot reach the core's services without them, and its web logs
+  // users in at the core's Keycloak and seals WHEP sessions as every other web does.
   public static readonly string[] RequiredCoreKeys =
   [
     "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_STATE_DB", "POSTGRES_FS_DB",
     "RABBITMQ_PORT", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS",
+    "KEYCLOAK_PORT", "KEYCLOAK_ADMIN_USER", "KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_REALM_NAME", "KEYCLOAK_CLIENT_ID",
+    "VMS_WHEP_SESSION_KEY",
   ];
 
   private const long MaxEntryBytes = 1 << 20;

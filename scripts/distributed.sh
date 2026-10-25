@@ -8,8 +8,10 @@
 #     scripts/distributed.sh package <node name>        -> data/distributed/node-<name>.tar.gz
 #     scripts/distributed.sh up | down | ps | logs ...    (compose with the right files)
 #   On a node, with the package copied over:
-#     scripts/distributed.sh join <package> <this machine's address>
+#     scripts/distributed.sh join <package> <this machine's address> [--no-mediamtx]
 #     scripts/distributed.sh up
+#   A node runs its own MediaMTX unless joined with --no-mediamtx, its cameras then publishing to
+#   the core's; and a web of its own, logging users in at the core's Keycloak.
 #
 # What crosses machines, and how it is protected:
 #   - every Dapr sidecar's internal gRPC port: mutual TLS, certificates from Dapr Sentry on the core.
@@ -17,8 +19,8 @@
 #     validator); without one it would sign anything for anybody (its "insecure" default).
 #   - app ids are found through HashiCorp Consul: a server on the core, an agent on every node,
 #     gossip encrypted with a key of this deployment. The agents' HTTP API stays on the loopback.
-#   - PostgreSQL, RabbitMQ, Dapr placement and MediaMTX on the core, behind their passwords and the
-#     core's firewall (see README.md).
+#   - PostgreSQL, RabbitMQ, Dapr placement and Keycloak on the core, and every MediaMTX, behind their
+#     passwords and the firewall (see README.md).
 #
 # Needs openssl, jq and docker compose.
 set -euo pipefail
@@ -30,18 +32,19 @@ COMPOSE=(docker compose -f docker-compose.distributed.yml --env-file .env --env-
 # by default outside Kubernetes: "localhost" for the control plane, "public" for applications.
 SENTRY_ID=spiffe://localhost/ns/default/dapr-sentry
 # What a node takes from its core (core.env in the package): the credentials and ports of the
-# core's PostgreSQL, RabbitMQ and MediaMTX. Nothing else: the rest of an installation's settings are
+# core's PostgreSQL, RabbitMQ, MediaMTX and Keycloak, and the key every web seals WHEP sessions
+# with. Nothing else: the rest of an installation's settings are
 # the same in every release or belong to the machine (paths, hosts), and a Windows core's would be
 # Windows paths. TaVmsHost on Windows writes and reads the same list.
-CORE_KEYS='^(POSTGRES_(PORT|USER|PASSWORD)|POSTGRES_[A-Z0-9_]+_DB|RABBITMQ_(PORT|DEFAULT_USER|DEFAULT_PASS)|VMS_MEDIAMTX_(PUBLISH|READ)_(USER|PASS))[[:space:]]*='
+CORE_KEYS='^(POSTGRES_(PORT|USER|PASSWORD)|POSTGRES_[A-Z0-9_]+_DB|RABBITMQ_(PORT|DEFAULT_USER|DEFAULT_PASS)|VMS_MEDIAMTX_(PUBLISH|READ)_(USER|PASS)|KEYCLOAK_(PORT|ADMIN_USER|ADMIN_PASSWORD|REALM_NAME|CLIENT_ID)|VMS_WHEP_SESSION_KEY)[[:space:]]*='
 
 die() { echo "error: $*" >&2; exit 1; }
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-# A value of this machine's environment: .env, overridden by distributed.env (on a node that holds
-# the core's values from core.env). Double quotes are stripped; single quotes are not, which no
-# generated value uses.
+# A value of this machine's environment: .env, overridden by the core's values on a node (core.env,
+# which distributed.env repeats) and by distributed.env. Double quotes are stripped; single quotes
+# are not, which no generated value uses.
 env_value() {
-  { cat .env; if [[ -f "$DIST/distributed.env" ]]; then cat "$DIST/distributed.env"; fi; } |
+  { cat .env; for f in "$DIST/core.env" "$DIST/distributed.env"; do if [[ -f "$f" ]]; then cat "$f"; fi; done; } |
     sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" | tail -n1 | tr -d '"'
 }
 
@@ -213,7 +216,7 @@ EOF
 
 # This machine's own part of the environment, after the shared part, as one file compose reads.
 write_machine_env() {
-  local role=$1 address=$2 node=$3 pairs
+  local role=$1 address=$2 node=$3 mediamtx=${4:-1} pairs
   pairs="vms:vmsfs:vmsonvif:vmslogger"
   [[ -f "$DIST/nodes" ]] && pairs+=$(sed 's/^/,/' "$DIST/nodes" | tr -d '\n')
   {
@@ -227,6 +230,9 @@ write_machine_env() {
     echo "TAVMS_NODE_NAME=$node"
     echo "DAPR_HOST_IP=$address"
     echo "MEDIA_SERVER_PAIRS=$pairs"
+    # Whether this machine runs MediaMTX: always on the core; a node's, unless --no-mediamtx
+    # (`up` adds the profile node-mediamtx).
+    echo "TAVMS_MEDIAMTX=$mediamtx"
     # What differs from .env, as windows/config/windows.env is for Windows: no compose network to
     # name hosts by, so the core's address; the ports Dapr's control plane listens on; and what a
     # distributed deployment does not run yet.
@@ -234,7 +240,8 @@ write_machine_env() {
     core=$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")
     echo "POSTGRES_HOST=$core"
     echo "VMS_MTX_HOST=$core"
-    echo "KEYCLOAK_URL=http://127.0.0.1:$(env_value KEYCLOAK_PORT)"
+    # The core's Keycloak, on its address (KC_HTTP_HOST), and on a node at the core's port.
+    echo "KEYCLOAK_URL=http://$core:$(env_value KEYCLOAK_PORT)"
     echo "DAPR_PLACEMENT_PORT=6050"
     echo "DAPR_SENTRY_PORT=6055"
     echo "DAPR_ANALYTICS_WORKER_APP_IDS="
@@ -271,7 +278,13 @@ cmd_package() {
 }
 
 cmd_join() {
-  local package=${1:?usage: distributed.sh join <package> <this machine address>} address=${2:?this machine address}
+  local package=${1:?usage: distributed.sh join <package> <this machine address> [--no-mediamtx]} address=${2:?this machine address}
+  local mediamtx=1
+  case "${3:-}" in
+    "") ;;
+    --no-mediamtx) mediamtx=0 ;;
+    *) die "unknown option '$3'" ;;
+  esac
   [[ ! -e "$DIST" ]] || die "$DIST exists: this machine is part of a deployment already"
   umask 077
   mkdir -p "$DIST/tokens"
@@ -279,10 +292,14 @@ cmd_join() {
   # The core's passwords and ports go into distributed.env (write_machine_env), on top of this
   # machine's own .env, so that this node's services and components use the same as the core's.
   [[ -f "$DIST/core.env" ]] || die "$package has no core.env"
-  write_machine_env node "$address" "$(cat "$DIST/name")"
+  write_machine_env node "$address" "$(cat "$DIST/name")" "$mediamtx"
   write_components "$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")"
   write_sidecars node "$(cat "$DIST/name")"
   echo "node ready: $DIST. Start it with: scripts/distributed.sh up"
+  if [[ $mediamtx == 1 ]]; then
+    echo "For its cameras' video to stay on this machine, add its MediaMTX in the web interface"
+    echo "(Administration, MediaMTX: host $address, node vms-$(cat "$DIST/name"))."
+  fi
 }
 
 case "${1:-}" in
@@ -291,6 +308,10 @@ case "${1:-}" in
   join) shift; cmd_join "$@" ;;
   up|down|ps|logs|pull|restart|stop|start|config|exec)
     [[ -f "$DIST/distributed.env" ]] || die "run 'distributed.sh core' or 'distributed.sh join' first"
-    "${COMPOSE[@]}" --profile "$(sed -n 's/^TAVMS_ROLE=//p' "$DIST/distributed.env")" "$@" ;;
-  *) sed -n '2,21p' "$0"; exit 2 ;;
+    profiles=(--profile "$(sed -n 's/^TAVMS_ROLE=//p' "$DIST/distributed.env")")
+    if grep -qx 'TAVMS_ROLE=node' "$DIST/distributed.env" && grep -qx 'TAVMS_MEDIAMTX=1' "$DIST/distributed.env"; then
+      profiles+=(--profile node-mediamtx)
+    fi
+    "${COMPOSE[@]}" "${profiles[@]}" "$@" ;;
+  *) sed -n '2,25p' "$0"; exit 2 ;;
 esac

@@ -11,6 +11,7 @@
   A deployment over several machines (windows/README.md), in the wizard's Role page or unattended:
     ta_vms-setup-x64.exe /quiet /norestart Role=core Address=<this machine's address>
     ta_vms-setup-x64.exe /quiet /norestart Role=node Address=<this machine's address> NodePackage=<file>
+  A node runs a MediaMTX of its own unless given NodeMediaMtx=0; its cameras then publish to the core's.
   An upgrade keeps the role.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
@@ -60,6 +61,7 @@
     <Variable Name="Role" bal:Overridable="yes" />
     <Variable Name="Address" bal:Overridable="yes" />
     <Variable Name="NodePackage" bal:Overridable="yes" />
+    <Variable Name="NodeMediaMtx" Type="numeric" Value="1" bal:Overridable="yes" />
 
     <!-- An upgrade stays where the installation is: where the MSI recorded it, or, coming from the
          Inno Setup installer of 0.1.5 and before, where that one put it. A search that finds
@@ -133,6 +135,7 @@
         <MsiProperty Name="TAVMSROLE" Value="[Role]" />
         <MsiProperty Name="TAVMSADDRESS" Value="[Address]" />
         <MsiProperty Name="NODEPACKAGE" Value="[NodePackage]" />
+        <MsiProperty Name="NODEMEDIAMTX" Value="[NodeMediaMtx]" />
       </MsiPackage>
     </Chain>
   </Bundle>

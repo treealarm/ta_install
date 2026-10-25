@@ -81,6 +81,8 @@
             <Label X="11" Y="207" Width="-11" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RolePackageLabel)</Label>
             <Editbox Name="NodePackage" X="11" Y="227" Width="-91" Height="21" TabStop="yes" FontId="3" FileSystemAutoComplete="yes" VisibleCondition="Role = &quot;node&quot;" />
             <Button Name="NodePackageBrowseButton" X="-11" Y="226" Width="75" Height="23" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;">#(loc.OptionsBrowseButton)</Button>
+            <!-- Bound to the variable of the same name, as NodePackage is: 1 or 0 (Bundle.wxs). -->
+            <Checkbox Name="NodeMediaMtx" X="11" Y="256" Width="290" Height="17" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleMediaMtx)</Checkbox>
             <Button Name="RoleOkButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
                 <Text>#(loc.OptionsOkButton)</Text>
                 <ChangePageAction Page="Install" />

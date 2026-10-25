@@ -182,7 +182,8 @@ services:
       KC_DB_USERNAME: "${POSTGRES_USER}"
       KC_DB_PASSWORD: "${POSTGRES_PASSWORD}"
       KC_HTTP_ENABLED: "true"
-      KC_HTTP_HOST: 127.0.0.1
+      # The core's address: every machine's web logs users in here (KEYCLOAK_URL, distributed.sh).
+      KC_HTTP_HOST: "${DAPR_HOST_IP}"
       KC_HTTP_PORT: "${KEYCLOAK_PORT}"
       KC_HOSTNAME_STRICT: "false"
       KC_CACHE: local
@@ -207,10 +208,11 @@ services:
     depends_on:
       - keycloak
 
-  # One MediaMTX for the deployment for now, on the core: the nodes publish their cameras to it, and
-  # web_vms serves them from it. Its Control API and WHEP listener are on the core's address, where
-  # the MediaMTX row VmsCfg seeds from VMS_MTX_HOST points every service, behind vms_read's password.
-  mediamtx:
+  # The core's MediaMTX, and a node's (node-mediamtx) unless the node was joined with
+  # --no-mediamtx: its cameras then publish to this one. The Control API and WHEP listener are on the
+  # machine's address, where VmsUtils and every machine's web reach them through the MediaMTX rows in
+  # VmsCfg, behind vms_read's password; a node's passwords are the core's, from its package.
+  mediamtx: &mediamtx
     <<: *core
     image: bluenviron/mediamtx:latest
     logging: *logging
@@ -493,6 +495,26 @@ services:
               "-placement-host-address", "${CORE_ADDRESS}:${DAPR_PLACEMENT_PORT}",
               "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsonvif-actors-${TAVMS_NODE_NAME}.yaml"]
     depends_on: [node-vmsonvif-actors, consul-agent]
+
+  # An operator opens any machine's web and sees the whole deployment. User administration (mt_admin)
+  # is the core's: no link to it from here.
+  node-web_vms:
+    <<: [*node, *app]
+    image: treealarm/web_vms:latest
+    environment: { APP_ID: "web-vms-${TAVMS_NODE_NAME}", DAPR_HTTP_PORT: "3600", DAPR_GRPC_PORT: "41001", MT_ADMIN_PORT: "" }
+  node-web_vms-dapr:
+    <<: [*node, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: "/dist/tokens/web-vms-${TAVMS_NODE_NAME}.token" }
+    command: ["./daprd", "-app-id", "web-vms-${TAVMS_NODE_NAME}", "-app-port", "${WEB_VMS_PORT}", "-app-protocol", "http",
+              "-dapr-http-port", "3600", "-dapr-grpc-port", "41001", "-dapr-internal-grpc-port", "19011", "-metrics-port", "9190",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/web-vms-${TAVMS_NODE_NAME}.yaml"]
+    depends_on: [node-web_vms, consul-agent]
+
+  node-mediamtx:
+    <<: *mediamtx
+    profiles: [node-mediamtx]
 
   node-vmslogger:
     <<: [*node, *app]

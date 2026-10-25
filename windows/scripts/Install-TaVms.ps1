@@ -38,7 +38,10 @@ param(
   [string] $Address = '',
   # A new node: the package its core made for it (TaVmsHost package <name> on a Windows core,
   # scripts/distributed.sh package <name> on a Linux one), on a local disk.
-  [string] $NodePackage = ''
+  [string] $NodePackage = '',
+  # A new node: 0 for no MediaMTX here, its cameras then publishing to the core's. Anything else,
+  # empty included, runs one.
+  [string] $NodeMediaMtx = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -166,15 +169,17 @@ function Initialize-Role {
     Write-Step "joining the core with $NodePackage"
     Assert-OwnAddress
     if (-not $NodePackage -or -not (Test-Path $NodePackage)) { throw "-Role node needs -NodePackage, the package the core made for this node" }
-    Invoke-Checked $hostExe @('join', [IO.Path]::GetFullPath($NodePackage), $Address, '--data', $DataDir)
+    $join = @('join', [IO.Path]::GetFullPath($NodePackage), $Address)
+    if ($NodeMediaMtx -eq '0') { $join += '--no-mediamtx' }
+    Invoke-Checked $hostExe ($join + @('--data', $DataDir))
   }
 }
 
 function New-SiteEnv([string] $path) {
   # Generated for this machine. A new installation gets all of them; an upgrade gets only the ones a
   # newer version introduced, and nothing already in the file is touched: PostgreSQL, RabbitMQ and
-  # Keycloak were set up with what is there. A node gets none: it runs no PostgreSQL, RabbitMQ,
-  # MediaMTX, Keycloak or web, and uses the core's credentials, which come in its package.
+  # Keycloak were set up with what is there. A node gets none: it runs no PostgreSQL, RabbitMQ or
+  # Keycloak, and its MediaMTX and web use the core's credentials, which come in its package.
   $generated = if ($TheRole -eq 'node') { [ordered]@{} } else { [ordered]@{
     POSTGRES_PORT             = { Get-FreePort 5432 }
     POSTGRES_PASSWORD         = { New-Secret }
@@ -371,12 +376,16 @@ function Set-FirewallRules {
   $common = @{ Group = $FirewallGroup; Direction = 'Inbound'; Action = 'Allow'; Profile = 'Any' }
   # What only the other machines of the deployment reach: from this subnet, not from anywhere.
   $deployment = $common + @{ RemoteAddress = 'LocalSubnet' }
+  # Every machine has a web: an operator opens any of them.
+  New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - web' -Protocol TCP -LocalPort (Get-StackValue 'WEB_VMS_PORT') `
+    -Program (Join-Path $InstallDir 'dotnet\web_srv.Server\web_srv.Server.exe') | Out-Null
   if ($TheRole -ne 'node') {
-    New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - web' -Protocol TCP -LocalPort (Get-StackValue 'WEB_VMS_PORT') `
-      -Program (Join-Path $InstallDir 'dotnet\web_srv.Server\web_srv.Server.exe') | Out-Null
     New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - users' -Protocol TCP -LocalPort (Get-StackValue 'MT_ADMIN_PORT') `
       -Program (Join-Path $InstallDir 'mt_admin\mt_admin.Server.exe') | Out-Null
-    # A core's MediaMTX also takes the nodes' cameras, published over RTSP.
+  }
+  $mediaMtx = (Get-StackValue 'TAVMS_MEDIAMTX') -eq '1'
+  if ($mediaMtx) {
+    # A core's MediaMTX also takes the cameras of nodes that have none, published over RTSP.
     New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - RTSP' -Protocol TCP -LocalPort 8554 `
       -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
     New-NetFirewallRule @common -DisplayName 'TreeAlarm VMS - WebRTC media' -Protocol UDP -LocalPort 8189 `
@@ -395,6 +404,11 @@ function Set-FirewallRules {
     New-NetFirewallRule @deployment -DisplayName "TreeAlarm VMS - Consul gossip ($protocol)" -Protocol $protocol -LocalPort 8301 `
       -Program (Join-Path $InstallDir 'consul\consul.exe') | Out-Null
   }
+  if ($mediaMtx) {
+    # VmsUtils on the core asks every MediaMTX who is watching; every machine's web relays WHEP.
+    New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - MediaMTX API and WHEP' -Protocol TCP -LocalPort '8889', '9997' `
+      -Program (Join-Path $InstallDir 'mediamtx\mediamtx.exe') | Out-Null
+  }
   if ($TheRole -ne 'core') { return }
 
   # The core: what the nodes' services and sidecars connect to.
@@ -408,6 +422,8 @@ function Set-FirewallRules {
     -Program (Join-Path $InstallDir 'pgsql\bin\postgres.exe') | Out-Null
   # By port: the listener is erl.exe, in a directory named after the Erlang version.
   New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - RabbitMQ' -Protocol TCP -LocalPort (Get-StackValue 'RABBITMQ_PORT') | Out-Null
+  # Every node's web logs users in here. By port: the listener is the bundled JRE's java.exe.
+  New-NetFirewallRule @deployment -DisplayName 'TreeAlarm VMS - Keycloak' -Protocol TCP -LocalPort (Get-StackValue 'KEYCLOAK_PORT') | Out-Null
 }
 
 function Install-HostService {
