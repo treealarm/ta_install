@@ -229,6 +229,9 @@ services:
       MTX_RTMP: "no"
       MTX_HLS: "no"
       MTX_SRT: "no"
+      # MoQ (Media over QUIC, on by default since MediaMTX added it): reading and publishing on
+      # 8892/8893 past the web, which nothing of ours uses.
+      MTX_MOQ: "no"
     volumes:
       - ./init_files/config/mediamtx.yml:/mediamtx.yml
 
