@@ -12,8 +12,18 @@
 # the standalone app ids (vms, vmsfs, ...). A node runs its own vms/vmsfs/vmsonvif/vmsonvif-actors/
 # vmslogger as <app>-<node name>; its video goes to the core's MediaMTX.
 
+# Docker keeps a container's output for ever by default (json-file without max-size). The
+# services write their own rotated logs under data/logs; this bounds what `docker compose logs`
+# keeps beside them.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-app: &app
   network_mode: host
+  logging: *logging
   restart: unless-stopped
   env_file:
     - .env
@@ -24,6 +34,7 @@ x-app: &app
 x-sidecar: &sidecar
   image: daprio/daprd:latest
   network_mode: host
+  logging: *logging
   restart: unless-stopped
   user: "${TAVMS_UID}:${TAVMS_GID}"
   volumes:
@@ -48,6 +59,7 @@ services:
   consul-server:
     <<: *core
     image: hashicorp/consul:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     command: ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
@@ -65,6 +77,7 @@ services:
   dapr-sentry:
     <<: *core
     image: daprio/sentry:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     user: "${TAVMS_UID}:${TAVMS_GID}"
@@ -77,6 +90,7 @@ services:
   dapr-placement:
     <<: *core
     image: daprio/dapr:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     user: "${TAVMS_UID}:${TAVMS_GID}"
@@ -96,6 +110,7 @@ services:
   postgres:
     <<: *core
     image: postgres:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     command: ["postgres", "-p", "${POSTGRES_PORT}"]
@@ -109,6 +124,7 @@ services:
   db-init:
     <<: *core
     image: postgres:latest
+    logging: *logging
     network_mode: host
     env_file:
       - .env
@@ -129,6 +145,7 @@ services:
   rabbitmq:
     <<: *core
     image: rabbitmq:management
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     environment:
@@ -150,6 +167,7 @@ services:
   keycloak:
     <<: *core
     image: quay.io/keycloak/keycloak:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     command: ["start", "--import-realm"]
@@ -190,6 +208,7 @@ services:
   mediamtx:
     <<: *core
     image: bluenviron/mediamtx:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     environment:
@@ -398,6 +417,7 @@ services:
   consul-agent:
     <<: *node
     image: hashicorp/consul:latest
+    logging: *logging
     network_mode: host
     restart: unless-stopped
     command: ["agent", "-ui=false", "-datacenter=tavms", "-node=${TAVMS_NODE_NAME}",

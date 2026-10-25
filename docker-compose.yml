@@ -7,15 +7,26 @@
 x-data-volume: &data-volume
   - ./data:/data
 
+# Docker keeps a container's output for ever by default (json-file without max-size). The
+# services write their own rotated logs under data/logs; this bounds what `docker compose logs`
+# keeps beside them.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # Actor placement. Reached by service name over the compose network, not through a published
   # host port: publishing 50005 collides with a `dapr init` placement on the deployment host.
   dapr-placement:
     image: daprio/dapr:latest
+    logging: *logging
     command: ["./placement", "-port", "50005"]
 
   postgres:
     image: postgres:latest
+    logging: *logging
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-postgres}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
@@ -37,6 +48,7 @@ services:
   #   docker compose run --rm db-init --check    # report only, create nothing
   db-init:
     image: postgres:latest
+    logging: *logging
     env_file:
       - .env
     volumes:
@@ -61,6 +73,7 @@ services:
   # unchanged: one durable queue per app id per topic, see init_files/dapr_components/orderpubsub.yaml.
   rabbitmq:
     image: rabbitmq:management
+    logging: *logging
     environment:
       # The built-in "guest" account is refused from anywhere but localhost, so no sidecar in a
       # container could use it. These must match the credentials in the orderpubsub component.
@@ -87,6 +100,7 @@ services:
   # it. The realm is imported once, on the first start, from init_files/keycloak.
   keycloak:
     image: quay.io/keycloak/keycloak:latest
+    logging: *logging
     command: ["start", "--import-realm"]
     environment:
       KC_DB: postgres
@@ -118,6 +132,7 @@ services:
   # this installation's realm and lets in only its administrators.
   mt_admin:
     image: treealarm/mt_admin:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -131,6 +146,7 @@ services:
 
   mediamtx:
     image: bluenviron/mediamtx:latest
+    logging: *logging
     # Passwords for the vms_publish / vms_read accounts declared in mediamtx.yml. MediaMTX merges
     # these into the yml entries by index, so the file keeps the users and permissions while the
     # secrets stay in .env. Both ports below now require one of those accounts.
@@ -146,6 +162,7 @@ services:
 
   vmssingleton:
     image: treealarm/vmssingleton:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -168,6 +185,7 @@ services:
 
   vmssingleton-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -194,6 +212,7 @@ services:
 
   vmssquaresingleton:
     image: treealarm/vmssquaresingleton:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -206,6 +225,7 @@ services:
 
   vmssquaresingleton-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -232,6 +252,7 @@ services:
 
   vmsptztrackingsingleton:
     image: treealarm/vmsptztrackingsingleton:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -244,6 +265,7 @@ services:
 
   vmsptztrackingsingleton-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -270,6 +292,7 @@ services:
 
   vmsutils:
     image: treealarm/vmsutils:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -284,6 +307,7 @@ services:
 
   vmsutils-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -308,6 +332,7 @@ services:
 
   vmslogger:
     image: treealarm/vmslogger:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -322,6 +347,7 @@ services:
 
   vmslogger-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -346,6 +372,7 @@ services:
 
   vmscfg:
     image: treealarm/vmscfg:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -364,6 +391,7 @@ services:
 
   vmscfg-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -388,6 +416,7 @@ services:
 
   vmsonvif:
     image: treealarm/vmsonvif:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -403,6 +432,7 @@ services:
 
   vmsonvif-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -429,6 +459,7 @@ services:
 
   vmsonvif-actors:
     image: treealarm/vmsonvif-actors:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -444,6 +475,7 @@ services:
 
   vmsonvif-actors-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -470,6 +502,7 @@ services:
 
   vmsfs:
     image: treealarm/vmsfs:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -487,6 +520,7 @@ services:
 
   vmsfs-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -511,6 +545,7 @@ services:
 
   vmsanalyticssingleton:
     image: treealarm/vmsanalyticssingleton:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -530,6 +565,7 @@ services:
 
   vmsanalyticssingleton-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -557,6 +593,7 @@ services:
   # the image (see video_a/Dockerfile), no volume needed.
   analytics-worker:
     image: treealarm/analytics-worker:latest
+    logging: *logging
     environment:
       ANALYTICS_GRPC_PORT: "50060"
       ANALYTICS_DEVICE: CPU
@@ -576,6 +613,7 @@ services:
 
   analytics-worker-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -600,6 +638,7 @@ services:
 
   vms:
     image: treealarm/vms:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -613,6 +652,7 @@ services:
 
   roitrc:
     image: treealarm/roitrc:latest
+    logging: *logging
     env_file:
       - .env
     environment:
@@ -632,6 +672,7 @@ services:
 
   roitrc-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -656,6 +697,7 @@ services:
 
   vms-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
@@ -680,6 +722,7 @@ services:
 
   web_vms:
     image: treealarm/web_vms:latest
+    logging: *logging
     ports:
       - "${WEB_VMS_PORT}:${WEB_VMS_PORT}"
     env_file:
@@ -692,6 +735,7 @@ services:
 
   web_vms-dapr:
     image: "daprio/daprd:latest"
+    logging: *logging
     command:
       - "./daprd"
       - "-app-id"
