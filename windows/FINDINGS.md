@@ -3,6 +3,31 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-25: the same machine as a node of a Linux core, Consul's key off the command line
+
+The installer of ta_install 919163d (CI run 40204151038, whose `core` job passed; ta_vms 8f22563),
+on the machine below, as a node of a core on the Linux machine next to it (`distributed.sh core
+192.168.1.45`, `treealarm/*:latest` of ta_vms dcf646f). The point was the gossip key, which now
+reaches Consul through `CONSUL_LOCAL_CONFIG` in compose and `distributed\consul.json` on Windows.
+
+- The standalone installation came off in 43 s; `Role=node Address=192.168.1.82
+  NodePackage=node-nhu.tar.gz` took **55 s**, and the node joined the core's Consul at once, its
+  five services healthy within two minutes.
+- **The key is on no command line**: `consul.exe agent ... -config-file=...\distributed\consul.json`,
+  the file readable by SYSTEM, Administrators and LocalService only; on the core neither `ps` nor
+  `docker top` shows it. Gossip encrypted on both, 8302 closed on both.
+- OnvifSim's four cameras on `vms-nhu`, added through the core's web: ONVIF through
+  `vmsonvif-nhu`, the masters' detections in the core. **Edge import through the node**: a 64.0 s
+  hole filled from the camera's card, the first recovered clip 1.8 s before the hole, on a key frame.
+- From the LAN the node answered on Consul's 8301 and the sidecars' 19013–19016 and 19018 only,
+  as the first box did.
+- The machine went off the network for an hour in the middle: Kernel-Power 42 with reason 4
+  (application API) and target S4, and a boot of type 1 — a shutdown from the Start menu with Fast
+  Startup, which hibernates the kernel and leaves the boot time as it was. Not sleep: idle sleep is
+  off on this machine. Nothing of ours keeps Windows awake, but nothing was seen to need it.
+
+The node was taken off again (64 s); the machine is left with nothing of ours installed.
+
 ## 2026-10-25: a second machine — a fresh install, a power cut, and the logs
 
 A second box for when the first is busy: DESKTOP-NHU77Q0, Windows 10 Pro 22H2, Russian locale,
@@ -13,8 +38,8 @@ C: and the archive put on D:. Someone else uses it at the console.
   `ta_vms-setup-x64.exe /quiet /norestart StorageFolder=D:\TreeAlarm`: **197 s**, exit code 0, the
   three services running and the web interface answering. The first run of the installer on a
   machine that never had it; every earlier entry is an upgrade.
-- **The power went** seven minutes later (Kernel-Power 41, no bugcheck; every boot in that
-  machine's log follows one, it is how it is switched off). After the boot the whole stack came up
+- **The power went** seven minutes later (Kernel-Power 41, no bugcheck, the power button not
+  pressed; 260 of the 287 boots in that machine's log follow one). After the boot the whole stack came up
   on its own: PostgreSQL and RabbitMQ recovered, all 26 processes started, the web interface 200.
 - **The logs, measured.** With no camera at all, 288 KB every five minutes (80 MB a day), nearly
   all of it in `host-logs\vmscfg.log`: ASP.NET's own console logger, which the services never
