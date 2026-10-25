@@ -20,7 +20,8 @@
     // --- several machines: how they find each other and trust each other -------------------------
     {
       // Resolves app ids for every machine of the deployment; the nodes' agents join it. Its HTTP
-      // API, which sidecars register through, stays on the loopback; DNS and gRPC are off. The
+      // API, which sidecars register through, stays on the loopback; DNS, gRPC and the WAN gossip
+      // port (8302, for joining datacenters, of which a deployment has one) are off. The
       // sidecars start only after it answers: daprd with the Consul resolver exits otherwise.
       "name": "consul-server",
       "roles": ["core"],
@@ -28,6 +29,7 @@
       "args": ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
                "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
                "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1",
+               "-serf-wan-port=-1",
                // Raft's default log store, wal, fsyncs its directory, which Windows refuses ("sync
                // ...\raft\wal: Access is denied"): the server would die on its first start and
                // whenever it opens or removes a log segment after that.

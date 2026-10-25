@@ -55,7 +55,8 @@ services:
   # --- the core's infrastructure ------------------------------------------------------------------
 
   # Resolves app ids for every machine. The other machines' agents join it; the HTTP API that
-  # sidecars register through stays on the loopback, and DNS and gRPC are off.
+  # sidecars register through stays on the loopback, and DNS, gRPC and the WAN gossip port (8302,
+  # for joining datacenters, of which a deployment has one) are off.
   consul-server:
     <<: *core
     image: hashicorp/consul:latest
@@ -64,7 +65,7 @@ services:
     restart: unless-stopped
     command: ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
-              "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"]
+              "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1", "-serf-wan-port=-1"]
     volumes:
       - ./data/consul:/consul/data
     healthcheck:
