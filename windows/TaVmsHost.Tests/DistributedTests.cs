@@ -45,7 +45,7 @@ public sealed class DistributedTests : IDisposable
     var consul = config.Infra(Infra(config, "consul-server"));
     Assert.Contains($"-bind={CoreAddress}", consul.Args);
     Assert.Contains("-client=127.0.0.1", consul.Args);
-    Assert.Contains($"-encrypt={config.Env["CONSUL_ENCRYPT"]}", consul.Args);
+    AssertConsulKey(config, consul, config.Env["CONSUL_ENCRYPT"]);
 
     var placementSpec = Infra(config, "placement");
     var placement = config.Infra(placementSpec);
@@ -90,6 +90,8 @@ public sealed class DistributedTests : IDisposable
     Assert.Contains($"-retry-join={CoreAddress}", agent.Args);
     Assert.Contains("-node=hall", agent.Args);
     Assert.Contains($"-bind={NodeAddress}", agent.Args);
+    // The core's key, which came in the package.
+    AssertConsulKey(config, agent, _core.Load().Env["CONSUL_ENCRYPT"]);
   }
 
   [Fact]
@@ -216,6 +218,14 @@ public sealed class DistributedTests : IDisposable
   }
 
   [Fact]
+  public void A_node_without_its_consul_configuration_does_not_start()
+  {
+    File.Delete(_node.Load().ConsulConfigPath);
+    var ex = Assert.Throws<InvalidOperationException>(() => _node.Load());
+    Assert.Contains("consul.json", ex.Message);
+  }
+
+  [Fact]
   public void Neither_machine_becomes_a_core_or_joins_twice()
   {
     Assert.Throws<InvalidOperationException>(() => Distributed.Core(_core.Load(), CoreAddress, TextWriter.Null));
@@ -296,6 +306,15 @@ public sealed class DistributedTests : IDisposable
 
   // services.json is written for Windows; these tests also run on Linux.
   private static string Slashes(string path) => path.Replace('\\', Path.DirectorySeparatorChar);
+
+  // Consul gets the gossip key from the file services.json names, and nowhere on its command line.
+  private static void AssertConsulKey(StackConfig config, ProcessSpec consul, string key)
+  {
+    Assert.DoesNotContain(consul.Args, a => a.Contains(key));
+    var file = Slashes(consul.Args.Single(a => a.StartsWith("-config-file="))["-config-file=".Length..]);
+    Assert.Equal(config.ConsulConfigPath, file);
+    Assert.Equal(key, JsonDocument.Parse(File.ReadAllText(file)).RootElement.GetProperty("encrypt").GetString());
+  }
 
   private static InfraProcess Infra(StackConfig config, string name) => config.Manifest.Infrastructure.Single(i => i.Name == name);
   private static DaprApp App(StackConfig config, string appId) => config.Manifest.Apps.Single(a => a.AppId == appId);

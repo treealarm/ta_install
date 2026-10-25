@@ -56,7 +56,9 @@ services:
 
   # Resolves app ids for every machine. The other machines' agents join it; the HTTP API that
   # sidecars register through stays on the loopback, and DNS, gRPC and the WAN gossip port (8302,
-  # for joining datacenters, of which a deployment has one) are off.
+  # for joining datacenters, of which a deployment has one) are off. The gossip key reaches Consul
+  # through the image's CONSUL_LOCAL_CONFIG, which its entrypoint writes into /consul/config: on the
+  # command line any local user could read it (/proc/<pid>/cmdline), the environment only root can.
   consul-server:
     <<: *core
     image: hashicorp/consul:latest
@@ -64,8 +66,10 @@ services:
     network_mode: host
     restart: unless-stopped
     command: ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
-              "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
+              "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1",
               "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1", "-serf-wan-port=-1"]
+    environment: &consul-key
+      CONSUL_LOCAL_CONFIG: '{"encrypt": "${CONSUL_ENCRYPT}"}'
     volumes:
       - ./data/consul:/consul/data
     healthcheck:
@@ -422,8 +426,9 @@ services:
     network_mode: host
     restart: unless-stopped
     command: ["agent", "-ui=false", "-datacenter=tavms", "-node=${TAVMS_NODE_NAME}",
-              "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}", "-retry-join=${CORE_ADDRESS}",
+              "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-retry-join=${CORE_ADDRESS}",
               "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"]
+    environment: *consul-key
     volumes:
       - ./data/consul:/consul/data
     healthcheck:

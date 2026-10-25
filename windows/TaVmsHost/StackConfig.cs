@@ -38,6 +38,8 @@ internal sealed class StackConfig
   public static string DistributedDirOf(string data) => Path.Combine(data, "distributed");
   public string DistributedDir => DistributedDirOf(Data);
   public string TokenPath(string appId) => Path.Combine(DistributedDir, "tokens", $"{appId}.token");
+  // Consul's gossip key, in a configuration file of Consul's own rather than on its command line.
+  public string ConsulConfigPath => Path.Combine(DistributedDir, "consul.json");
   public static string SiteEnvPath(string data) => Path.Combine(data, "config", "site.env");
   public static string ManifestPath(string home) => Path.Combine(home, "config", "services.json");
 
@@ -97,13 +99,16 @@ internal sealed class StackConfig
   // and the supervisor would restart it for ever.
   private void CheckDistributed()
   {
-    foreach (var key in new[] { "CORE_ADDRESS", "CONSUL_ENCRYPT", "DAPR_TRUST_ANCHORS" })
+    foreach (var key in new[] { "CORE_ADDRESS", "DAPR_TRUST_ANCHORS" })
     {
       if (string.IsNullOrWhiteSpace(Env.GetValueOrDefault(key)))
         throw new InvalidOperationException(
           $"TAVMS_ROLE={Role.Name()}, but {key} is not set: it comes from {Path.Combine(DistributedDir, "shared.env")}, " +
           "which 'TaVmsHost core' writes on a core and 'TaVmsHost join' brings to a node");
     }
+    if (!File.Exists(ConsulConfigPath))
+      throw new InvalidOperationException(
+        $"TAVMS_ROLE={Role.Name()}, but {ConsulConfigPath} is missing: 'TaVmsHost core' and 'TaVmsHost join' write it");
     // Other machines reach this one's sidecars at the address they register with Consul.
     if (System.Net.IPAddress.TryParse(Require("DAPR_HOST_IP"), out var ip) && System.Net.IPAddress.IsLoopback(ip))
       throw new InvalidOperationException(

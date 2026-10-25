@@ -27,7 +27,9 @@
       "roles": ["core"],
       "exe": "consul\\consul.exe",
       "args": ["agent", "-server", "-bootstrap-expect=1", "-ui=false", "-datacenter=tavms", "-node=core",
-               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}",
+               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1",
+               // The gossip key: 'TaVmsHost core' and 'join' write it there, off the command line.
+               "-config-file=${TAVMS_DATA}\\distributed\\consul.json",
                "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1",
                "-serf-wan-port=-1",
                // Raft's default log store, wal, fsyncs its directory, which Windows refuses ("sync
@@ -43,7 +45,8 @@
       "roles": ["node"],
       "exe": "consul\\consul.exe",
       "args": ["agent", "-ui=false", "-datacenter=tavms", "-node=${TAVMS_NODE_NAME}",
-               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-encrypt=${CONSUL_ENCRYPT}", "-retry-join=${CORE_ADDRESS}",
+               "-bind=${DAPR_HOST_IP}", "-client=127.0.0.1", "-retry-join=${CORE_ADDRESS}",
+               "-config-file=${TAVMS_DATA}\\distributed\\consul.json",
                "-data-dir=${TAVMS_DATA}\\consul", "-dns-port=-1", "-grpc-port=-1", "-grpc-tls-port=-1"],
       "env": { "CHECKPOINT_DISABLE": "1" },
       "readyPort": "8500"

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace TaVmsHost;
 
@@ -19,6 +20,7 @@ namespace TaVmsHost;
 //   tokens\         <app id>.token for each sidecar of this machine; on the core also
 //                   dapr-placement.token (on Linux it sits in core\, which LocalService cannot read)
 //   shared.env      the deployment's core address, Consul key and root (an env layer, StackConfig)
+//   consul.json     the Consul key again, as Consul reads it (-config-file)
 //   core.env        a node: the core's credentials (an env layer too)
 //   nodes, name     the nodes' pairs; a node's own name
 //
@@ -57,9 +59,11 @@ internal static class Distributed
       WriteText(config.TokenPath(app.AppId), Pki.Token(signingKey, Pki.AppSpiffeId(app.AppId), now));
     WriteText(config.TokenPath("dapr-placement"), Pki.Token(signingKey, Pki.PlacementId, now));
 
+    var consulKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+    WriteText(config.ConsulConfigPath, ConsulConfiguration(consulKey));
     WriteText(Path.Combine(dir, "shared.env"), string.Join('\n',
       $"CORE_ADDRESS={ip}",
-      $"CONSUL_ENCRYPT={Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))}",
+      $"CONSUL_ENCRYPT={consulKey}",
       // Quoted over several lines, which compose and EnvFile read back as one value.
       $"DAPR_TRUST_ANCHORS=\"{authority.RootCertPem.TrimEnd('\n')}\"") + "\n");
 
@@ -144,6 +148,7 @@ internal static class Distributed
     Directory.CreateDirectory(Path.Combine(dir, "tokens"));
     foreach (var (file, content) in files)
       WriteText(Path.Combine(dir, file.Replace('/', Path.DirectorySeparatorChar)), content);
+    WriteText(config.ConsulConfigPath, ConsulConfiguration(shared["CONSUL_ENCRYPT"]));
 
     SiteEnv.Set(StackConfig.SiteEnvPath(config.Data),
     [
@@ -179,6 +184,12 @@ internal static class Distributed
     if (string.IsNullOrWhiteSpace(env.GetValueOrDefault(key)))
       throw new InvalidDataException($"{where} has no {key}");
   }
+
+  // On Consul's command line the key would be in plain sight of anyone who lists processes; here it
+  // is behind the ACL of <data>\distributed. Consul reads it on its first start only: from then on
+  // it keeps the keyring in its data directory.
+  private static string ConsulConfiguration(string key) =>
+    JsonSerializer.Serialize(new Dictionary<string, string> { ["encrypt"] = key }) + "\n";
 
   private static string SentryConfiguration(string jwks) => $"""
     # Written by 'TaVmsHost core'. Sentry signs a certificate for an app id only against a token
