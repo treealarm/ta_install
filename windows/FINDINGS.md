@@ -3,6 +3,40 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-25: a second machine — a fresh install, a power cut, and the logs
+
+A second box for when the first is busy: DESKTOP-NHU77Q0, Windows 10 Pro 22H2, Russian locale,
+Intel Core i5-3450 (Ivy Bridge, HD Graphics 2500, no discrete GPU), 7.7 GB, on Wi-Fi, 17 GB free on
+C: and the archive put on D:. Someone else uses it at the console.
+
+- **A fresh install**, the CI build of ta_install 7876bda (ta_vms 8f22563),
+  `ta_vms-setup-x64.exe /quiet /norestart StorageFolder=D:\TreeAlarm`: **197 s**, exit code 0, the
+  three services running and the web interface answering. The first run of the installer on a
+  machine that never had it; every earlier entry is an upgrade.
+- **The power went** seven minutes later (Kernel-Power 41, no bugcheck; every boot in that
+  machine's log follows one, it is how it is switched off). After the boot the whole stack came up
+  on its own: PostgreSQL and RabbitMQ recovered, all 26 processes started, the web interface 200.
+- **The logs, measured.** With no camera at all, 288 KB every five minutes (80 MB a day), nearly
+  all of it in `host-logs\vmscfg.log`: ASP.NET's own console logger, which the services never
+  removed, wrote two lines for every gRPC request and the text of every SQL command at Information
+  — none of it in the services' own logs, where `Microsoft` is held at Warning. With the OnvifSim
+  cameras added, `vmsutils` wrote four lines per MediaMTX API call (IHttpClientFactory). Ten PTZ
+  status calls to a camera that was off wrote 316 KB: the SOAP envelope of each request at Debug,
+  and OnvifLib's "connection refused" with its whole stack, six times per call. The Russian text of
+  that error reached `host-logs` as mojibake (the console's code page, 866, read as UTF-8). Fixed
+  in ta_vms (VmsLog: Serilog the only provider, OnvifLib under a category of its own at
+  Information, HttpClient at Warning, a redirected console in UTF-8) and in OnvifLib (an unreachable
+  camera without its stack), tried here by replacing the DLLs: no camera, nothing in five minutes;
+  the ten calls 20 KB, the error text readable. What is left is in ta_vms
+  `docs/future_plans/log-volume-leftovers.md`.
+- **Edge import works on Windows**, the first time it could be tried: OnvifSim's Profile G
+  (`tests/onvifsim/onvifsim_lab.py edge` in ta_vms, the sim on the Linux machine). sim-master off
+  the network for 60 s and recording on its own card; once it was back, the 64.7 s hole was found,
+  replayed from the camera and filed, the first recovered clip 6.9 s before the hole and 0.54 s
+  from a key frame of the camera's recording. Clips under `D:\TreeAlarm\media_storage`.
+- **Docker kept container output for ever** — no `logging` in either compose file, and json-file
+  rotates nothing by default. Both now bound it at 10 MB × 3 per container.
+
 ## 2026-10-23: a core and a node on two machines, both ways
 
 The installer of ta_install bf937ed (CI run 39997009100, ta_vms 49228fc), this box as one machine
