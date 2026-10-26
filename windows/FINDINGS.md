@@ -3,6 +3,38 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-26, afternoon: upgrading the v0.1.6 release to main, on both machines
+
+The candidate for v0.1.7: the installer of ta_install 627e159 (CI run 40312591238, ta_vms 384fee1),
+unattended (`/quiet /norestart`), over the v0.1.6 release installed fresh on each machine with one
+HEVC camera recording continuously (1080p25 test pattern published from the LAN, `transcode_hevc`
+on). The wizard was not run: nobody was logged on at the first machine's console, and another
+person was at the second's.
+
+| | 192.168.1.100 (i5-750, GTX 1050 Ti) | 192.168.1.82 (i5-3450, HD 2500, Wi-Fi) |
+|---|---|---|
+| v0.1.6 fresh install | 332 s | 152 s, recordings on D: |
+| upgrade to main | **283 s**, exit 0 | **220 s**, exit 0 |
+| processes after it | 26 running, no restarts | 26 running, no restarts |
+| clips | 18 → 20, the oldest still listed | 53 → 55, the oldest still listed |
+| live HEVC | `decoding on d3d11va`, NVENC, vms 5.1 % of a core | NVENC declines, libx264, vms 87 % of a core |
+
+- The clips recorded by 0.1.6 play after the upgrade: the oldest one's HLS playlist answers 200
+  and its first fragment comes back whole (`moof`, 1 036 048 bytes), on both machines. Recording
+  went on by itself; the gap is the upgrade's own downtime.
+- Without an NVIDIA card the refusal reads as it should: `[D3D11VA] Failed to find d3d11va adapter
+  by vendor id 0x10de` and `no NVIDIA d3d11va device: no NVIDIA card, or no driver for it`, at
+  once, and the stream goes to the CPU path as before (0.1.6 said `no CUDA device` there).
+- The viewer on the first machine got 25 fps, 3.9 Mbit/s, no loss — once its publisher was
+  restarted. Before that, with two 1080p libx265 publishers and two viewers on one Linux machine
+  on Wi-Fi, both viewers saw losses and freezes; the publisher had logged a 35.8 s lag, and with a
+  fresh publisher alone they were gone. The source, not the upgrade.
+- Taking 0.1.7 (the morning's install) off the first machine took **3 min 58 s**; the WiX
+  installs on the second machine came off in 43 s and 64 s on 2026-10-25. Not looked into.
+- The first machine was switched off in the middle, at 14:18, by its power button (winlogon on
+  behalf of SYSTEM, reason 0x500ff), right after the 0.1.6 install. After the power came back the
+  stack started by itself, and the test went on from there.
+
 ## 2026-10-26: NVENC on a Direct3D 11 device, decoding on D3D11VA
 
 A fresh standalone install of v0.1.7 (ta_install bf937ed, 168 s), with only `vms` replaced by CI
