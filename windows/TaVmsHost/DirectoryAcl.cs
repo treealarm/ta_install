@@ -31,4 +31,21 @@ internal static class DirectoryAcl
     if (serviceReads) Allow(WellKnownSidType.LocalServiceSid, FileSystemRights.ReadAndExecute);
     new DirectoryInfo(path).SetAccessControl(security);
   }
+
+  // One file the service account may read in a directory it may not: LocalService still reaches it
+  // by its full path (every account may traverse a directory it cannot list).
+  public static void AllowServiceRead(string file)
+  {
+    if (OperatingSystem.IsWindows()) AllowServiceReadOnWindows(file);
+  }
+
+  [SupportedOSPlatform("windows")]
+  private static void AllowServiceReadOnWindows(string file)
+  {
+    var info = new FileInfo(file);
+    var security = info.GetAccessControl();
+    security.AddAccessRule(new FileSystemAccessRule(
+      new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null), FileSystemRights.Read, AccessControlType.Allow));
+    info.SetAccessControl(security);
+  }
 }

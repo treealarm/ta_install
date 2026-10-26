@@ -24,7 +24,10 @@
   <String Id="RoleCore" Value="&amp;Core of a deployment over several computers" />
   <String Id="RoleNode" Value="&amp;Node: records cameras for a core on another computer" />
   <String Id="RoleAddressLabel" Value="This computer's address for the others:" />
-  <String Id="RolePackageLabel" Value="Node package the core made for this computer (node-&lt;name&gt;.tar.gz):" />
+  <String Id="RoleCoreListLabel" Value="Its core, found on this network:" />
+  <String Id="RoleCoreAddressLabel" Value="Core's address (or type it):" />
+  <String Id="RoleNodeNameLabel" Value="This node's name:" />
+  <String Id="RoleAdminLabel" Value="Administrator, if the core asks:" />
   <String Id="RoleMediaMtx" Value="&amp;MediaMTX on this computer for its cameras' live video" />
   <String Id="InstallInstallButton" Value="&amp;Install" />
   <String Id="InstallCancelButton" Value="&amp;Cancel" />

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -12,18 +13,23 @@ namespace TaVmsHost;
 //
 //   TaVmsHost core <address>          make this machine the core: root of trust, Sentry's issuer and
 //                                     configuration, the key that signs tokens, Consul's gossip key
-//   TaVmsHost package <node>          on the core: <data>\distributed\node-<node>.tar.gz
+//   TaVmsHost join --core <core> --name <node> <address> [--no-mediamtx]
+//                                     on a node: ask the core's web for this node's package
+//                                     (VmsCfg keeps the deployment's nodes and makes the packages)
 //   TaVmsHost join <package> <address> [--no-mediamtx]
-//                                     on a node; without MediaMTX its cameras publish to the core's
+//                                     on a node, with a package made in the core's web; without
+//                                     MediaMTX its cameras publish to the core's
 //
-//   core\           root.key, jwt.key: the core's secrets, closed to the service account
+//   core\           root.key: the root's key, closed to the service account; jwt.key, which signs
+//                   the tokens, readable by it, since VmsCfg signs the tokens of nodes that join
 //   sentry\         ca.crt, issuer.crt, issuer.key, config.yaml: what Sentry runs on (core)
 //   tokens\         <app id>.token for each sidecar of this machine; on the core also
 //                   dapr-placement.token (on Linux it sits in core\, which LocalService cannot read)
 //   shared.env      the deployment's core address, Consul key and root (an env layer, StackConfig)
 //   consul.json     the Consul key again, as Consul reads it (-config-file)
-//   core.env        a node: the core's credentials (an env layer too)
-//   nodes, name     the nodes' pairs; a node's own name
+//   core.env        a node: the core's credentials and where its services are (an env layer too)
+//   name            a node's own name
+//   nodes           on a core made before VmsCfg kept the nodes: the pairs it made packages for
 //
 // Each writes the role and this machine's address into site.env last, once everything else is in
 // place: a run that fails half-way leaves the machine as it was. Nothing here touches PostgreSQL,
@@ -50,6 +56,9 @@ internal static class Distributed
 
     WriteText(Path.Combine(dir, "core", "root.key"), authority.RootKeyPem);
     WriteText(Path.Combine(dir, "core", "jwt.key"), signingKey);
+    // VmsCfg, which runs as the service account, signs the tokens of the nodes that join later
+    // (TAVMS_DISTRIBUTED_DIR, StackConfig). The root's key stays out of its reach.
+    DirectoryAcl.AllowServiceRead(Path.Combine(dir, "core", "jwt.key"));
     WriteText(Path.Combine(dir, "sentry", "ca.crt"), authority.RootCertPem);
     WriteText(Path.Combine(dir, "sentry", "issuer.crt"), authority.IssuerCertPem);
     WriteText(Path.Combine(dir, "sentry", "issuer.key"), authority.IssuerKeyPem);
@@ -82,42 +91,42 @@ internal static class Distributed
     output.WriteLine($"This machine is the core at {ip}: {dir}");
   }
 
-  public static string Package(StackConfig config, string name, TextWriter output)
+  /// <summary>
+  /// Asks the core's web for this node's package (POST /api/deployment/join) and writes it to
+  /// <paramref name="path"/>. Once the administrator has closed enrollment there, the core wants an
+  /// administrator's user name and password.
+  /// </summary>
+  public static async Task FetchPackageAsync(string core, string name, string address, bool mediaMtx,
+    string? user, string? password, string path, HttpMessageHandler? handler = null)
   {
-    Roles.RequireNodeName(name, "node name");
-    var dir = config.DistributedDir;
-    var keyPath = Path.Combine(dir, "core", "jwt.key");
-    if (config.Role != Role.Core || !File.Exists(keyPath))
-      throw new InvalidOperationException("not a core: run 'TaVmsHost core <address>' first (the installer does, for Role=core)");
-
-    var nodesPath = Path.Combine(dir, "nodes");
-    var nodes = File.Exists(nodesPath) ? File.ReadAllLines(nodesPath).Where(l => l.Trim().Length > 0).ToList() : [];
-    var pair = $"vms-{name}:vmsfs-{name}:vmsonvif-{name}:vmslogger-{name}";
-    if (!nodes.Contains(pair)) nodes.Add(pair);
-    WriteText(nodesPath, string.Join('\n', nodes) + "\n");
-
-    var signingKey = File.ReadAllText(keyPath);
-    var now = DateTimeOffset.UtcNow;
-    var files = new Dictionary<string, string>
+    using var http = new HttpClient(handler ?? new HttpClientHandler()) { Timeout = TimeSpan.FromSeconds(30) };
+    var web = new Uri($"http://{core}/api/deployment");
+    JsonElement deployment;
+    try
     {
-      ["shared.env"] = File.ReadAllText(Path.Combine(dir, "shared.env")),
-      ["nodes"] = string.Join('\n', nodes) + "\n",
-      ["core.env"] = string.Join('\n', config.Env
-        .Where(kv => NodePackage.CoreKeys().IsMatch(kv.Key))
-        .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-        .Select(kv => $"{kv.Key}={EnvFile.Quote(kv.Key, kv.Value)}")) + "\n",
-      ["name"] = name + "\n",
-    };
-    // The node's sidecars, by the app ids services.json gives a node of this name.
-    foreach (var app in config.Services.ForRole(Role.Node, WithSuffix(config.Env, "-" + name)).Apps)
-      files[$"tokens/{app.AppId}.token"] = Pki.Token(signingKey, Pki.AppSpiffeId(app.AppId), now);
+      deployment = JsonDocument.Parse(await http.GetStringAsync(web)).RootElement;
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+    {
+      throw new InvalidOperationException($"no TreeAlarm VMS web answers at {web}: {ex.Message}", ex);
+    }
+    if (!deployment.TryGetProperty("distributed", out var distributed) || !distributed.GetBoolean())
+      throw new InvalidOperationException($"{core} is not the core of a deployment over several machines");
+    if (!deployment.GetProperty("enrollmentOpen").GetBoolean() && string.IsNullOrEmpty(user))
+      throw new InvalidOperationException(
+        $"enrollment of new nodes is closed at {core}: an administrator's user name and password are needed");
 
-    var path = Path.Combine(dir, $"node-{name}.tar.gz");
-    NodePackage.Write(path, files);
-    output.WriteLine($"Wrote {path}: copy it to the node and install there with Role=node, or run");
-    output.WriteLine("'scripts/distributed.sh join' on a Linux node.");
-    output.WriteLine("Then restart the TreeAlarm VMS service here (Restart-Service TaVmsHost), so that VmsCfg learns the node.");
-    return path;
+    using var response = await http.PostAsJsonAsync(new Uri(web, "deployment/join"),
+      new { name, address, mediaMtx, username = user ?? "", password = password ?? "" });
+    var body = await response.Content.ReadAsByteArrayAsync();
+    if (!response.IsSuccessStatusCode)
+    {
+      var reason = Encoding.UTF8.GetString(body);
+      try { reason = JsonDocument.Parse(body).RootElement.GetProperty("error").GetString() ?? reason; }
+      catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { }
+      throw new InvalidOperationException($"the core refused ({(int)response.StatusCode}): {reason}");
+    }
+    await File.WriteAllBytesAsync(path, body);
   }
 
   public static void Join(StackConfig config, string packagePath, string address, bool mediaMtx, TextWriter output)
@@ -145,7 +154,6 @@ internal static class Distributed
     var missing = apps.Where(a => !files.ContainsKey($"tokens/{a.AppId}.token")).Select(a => a.AppId).ToList();
     if (missing.Count > 0)
       throw new InvalidDataException($"{packagePath}: no token for {string.Join(", ", missing)}");
-    _ = File_("nodes");
 
     DirectoryAcl.Restrict(dir, serviceReads: true);
     Directory.CreateDirectory(Path.Combine(dir, "tokens"));
@@ -158,11 +166,13 @@ internal static class Distributed
       ("TAVMS_ROLE", Role.Node.Name()),
       ("TAVMS_NODE_NAME", name),
       ("DAPR_HOST_IP", ip),
-      // The core's PostgreSQL, RabbitMQ and MediaMTX, whose credentials come from core.env.
-      ("POSTGRES_HOST", shared["CORE_ADDRESS"]),
-      ("RABBITMQ_HOST", shared["CORE_ADDRESS"]),
-      ("VMS_MTX_HOST", shared["CORE_ADDRESS"]),
-      ("KEYCLOAK_URL", KeycloakUrl(shared["CORE_ADDRESS"], core["KEYCLOAK_PORT"])),
+      // The core's PostgreSQL, RabbitMQ, MediaMTX and Keycloak, whose credentials come from
+      // core.env. The package names where each one is; one made before it did means the core's
+      // address for all of them.
+      ("POSTGRES_HOST", CoreService(core, "POSTGRES_HOST", shared["CORE_ADDRESS"])),
+      ("RABBITMQ_HOST", CoreService(core, "RABBITMQ_HOST", shared["CORE_ADDRESS"])),
+      ("VMS_MTX_HOST", CoreService(core, "VMS_MTX_HOST", shared["CORE_ADDRESS"])),
+      ("KEYCLOAK_URL", CoreService(core, "KEYCLOAK_URL", KeycloakUrl(shared["CORE_ADDRESS"], core["KEYCLOAK_PORT"]))),
       // User administration (mt_admin) runs on the core only: this machine's web offers no link to it.
       ("MT_ADMIN_PORT", ""),
       // services.json "when" of mediamtx.
@@ -170,9 +180,10 @@ internal static class Distributed
     ]);
     output.WriteLine($"This machine is node '{name}' of the core at {shared["CORE_ADDRESS"]}: {dir}");
     output.WriteLine($"Its cameras are added in the web interface with server vms-{name}.");
-    if (mediaMtx)
-      output.WriteLine($"For their video to stay on this machine, add its MediaMTX there too (Administration, MediaMTX: host {ip}, node vms-{name}).");
   }
+
+  private static string CoreService(Dictionary<string, string> core, string key, string otherwise) =>
+    core.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : otherwise;
 
   private static string KeycloakUrl(string host, string port) => $"http://{host}:{port}";
 

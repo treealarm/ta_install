@@ -156,19 +156,30 @@ classes), then arm the camera.
 `docker-compose.yml` is one machine. To spread a deployment over several — a **core** with the
 infrastructure and the system-wide services, and **nodes**, each with its own cameras, recording
 and ONVIF — use `docker-compose.distributed.yml` through `scripts/distributed.sh` (Linux hosts;
-needs `openssl` and `jq`). The core is a node too.
+needs `openssl`, `jq`, `curl` and `perl`). The core is a node too.
 
 ```sh
 # on the core: set POSTGRES_PASSWORD and RABBITMQ_DEFAULT_PASS in .env first (nodes reach both)
 scripts/distributed.sh core 192.168.1.10      # this machine's address on the LAN
 scripts/distributed.sh up -d
-scripts/distributed.sh package hall           # a node named "hall" -> data/distributed/node-hall.tar.gz
-scripts/distributed.sh up -d                  # the core's services learn the node
 
-# on the node, with this repository and the package copied over
-scripts/distributed.sh join node-hall.tar.gz 192.168.1.20    # --no-mediamtx: no MediaMTX here
+# on a node, with this repository: it asks the core's web for its package
+scripts/distributed.sh join --core 192.168.1.10 --name hall 192.168.1.20    # --no-mediamtx: no MediaMTX here
 scripts/distributed.sh up -d
 ```
+
+**The core takes nodes in two stages.** While the deployment is being set up, enrollment is open:
+a machine that reaches the core's web joins without a password. Once every server is in, close it
+in the web UI (Administration → Deployment, the switch under the list); from then on a new node
+joins only with an administrator's user name and password — `TAVMS_JOIN_USER` and
+`TAVMS_JOIN_PASSWORD`, or typed when `join` asks. The same page lists the deployment's servers and
+removes one that has no cameras left (its credentials are not revoked yet). Its "+" makes a node's
+package as a file, for a machine that cannot reach the core's web or is set up by a script:
+`scripts/distributed.sh join node-hall.tar.gz 192.168.1.20`. The core needs no restart for a new
+node: its VmsCfg keeps the deployment's nodes.
+
+A core made with an earlier version signed tokens with Ed25519, which VmsCfg cannot: make it again
+with `core` (after `down` and moving `data/distributed` aside) to take nodes this way.
 
 A node's services carry its name: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`, `vmsonvif-actors-hall`,
 `vmslogger-hall`, `web-vms-hall`. **Every machine has the web UI**, and each shows the whole
@@ -177,10 +188,9 @@ deployment: open whichever is nearest; users log in at the core's Keycloak. User
 them from the node.
 
 **A node runs its own MediaMTX** unless joined with `--no-mediamtx`, so that its cameras' live video
-goes from the node to the browser rather than through the core. For that, add it in the web UI once
-(Administration → MediaMTX: host = the node's address, node = `vms-hall`; the accounts are filled in
-from the shared one). VmsCfg then gives the node's new cameras the node's MediaMTX; a camera added
-before keeps the one it had until you change it. Without a MediaMTX of its own, a node's cameras
+goes from the node to the browser rather than through the core. The core registers it when the node
+joins (Administration → MediaMTX shows it, pinned to `vms-hall`, with the shared accounts), and
+VmsCfg gives the node's cameras the node's MediaMTX. Without a MediaMTX of its own, a node's cameras
 publish to the core's.
 
 - **Every container runs in the host's network**, with a port of its own per sidecar, as on
@@ -192,9 +202,10 @@ publish to the core's.
   certificate for an app id only against a token for it, signed with the core's key; a node gets
   tokens for its own app ids only, in its package.
 - **The package is a credential**: it holds the node's tokens, the core's shared values (the
-  credentials and ports of its PostgreSQL, RabbitMQ, MediaMTX and Keycloak, and the key every web
-  seals live-video sessions with) and Consul's gossip key. Move it
-  the way you would move a password. Everything else a node runs with comes from its own `.env`.
+  credentials, ports and addresses of its PostgreSQL, RabbitMQ, MediaMTX and Keycloak, and the key
+  every web seals live-video sessions with) and Consul's gossip key. It crosses the network from the
+  core's web in plain HTTP; a file made there should be moved the way you would move a password.
+  Everything else a node runs with comes from its own `.env`.
 - **Firewall on the core**: let the nodes reach PostgreSQL (`POSTGRES_PORT`), RabbitMQ
   (`RABBITMQ_PORT`), Keycloak (`KEYCLOAK_PORT`), Dapr placement (6050) and Sentry (6055), Consul
   (8300, 8301 TCP/UDP), MediaMTX (RTSP 8554, API 9997, WHEP 8889) and the sidecars' internal ports

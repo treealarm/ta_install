@@ -10,9 +10,14 @@
 //   TaVmsHost env <KEY> [--data <dir>] print one value of the merged environment (for the
 //                                      installer scripts, so that only one parser reads env files)
 //   TaVmsHost core <address>           make this machine the core of a deployment over several
-//   TaVmsHost package <node>           machines, make a node's package on the core, join a node
-//   TaVmsHost join <package> <address> with it (Distributed.cs; the installer runs core and join);
-//     [--no-mediamtx]                  a node whose cameras publish to the core's MediaMTX
+//                                      machines (Distributed.cs; the installer runs core and join)
+//   TaVmsHost join --core <core> --name <node> <address> [--no-mediamtx]
+//                                      join it as a node, asking the core's web for the package; an
+//                                      administrator's TAVMS_JOIN_USER and TAVMS_JOIN_PASSWORD once
+//                                      the core has closed enrollment
+//   TaVmsHost join <package> <address> [--no-mediamtx]
+//                                      join it with a package made in the core's web; without
+//                                      MediaMTX the node's cameras publish to the core's
 //
 // The installation lives in the directory above this executable (<home>\host\TaVmsHost.exe); its
 // data in --data, %ProgramData%\TreeAlarm\VMS unless told otherwise.
@@ -48,8 +53,10 @@ switch (positional)
     return PrintEnv(home, data, key);
   case ["core", var address]:
     return RunDistributed(home, data, c => Distributed.Core(c, RequireLocal(address), Console.Out));
-  case ["package", var node]:
-    return RunDistributed(home, data, c => Distributed.Package(c, node, Console.Out));
+  case ["join", "--core", var core, "--name", var node, var address]:
+    return await JoinCoreAsync(home, data, core, node, RequireLocal(address), mediaMtx: true);
+  case ["join", "--core", var core, "--name", var node, var address, "--no-mediamtx"]:
+    return await JoinCoreAsync(home, data, core, node, RequireLocal(address), mediaMtx: false);
   case ["join", var package, var address]:
     return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: true, Console.Out));
   case ["join", var package, var address, "--no-mediamtx"]:
@@ -59,7 +66,7 @@ switch (positional)
     Native.SendCtrlC(int.Parse(pid, System.Globalization.CultureInfo.InvariantCulture));
     return 0;
   default:
-    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | package <node> | join <package> <address> [--no-mediamtx]   [--data <dir>]");
+    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | join (<package> | --core <core[:port]> --name <node>) <address> [--no-mediamtx]   [--data <dir>]");
     return 2;
 }
 
@@ -181,6 +188,35 @@ static int RunDistributed(string home, string data, Action<StackConfig> command)
   try
   {
     command(StackConfig.Load(home, data));
+    return 0;
+  }
+  catch (Exception ex)
+  {
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+  }
+}
+
+// The package is fetched into the data directory, which only administrators and the service may
+// read, joined with, and deleted: it holds the core's passwords.
+static async Task<int> JoinCoreAsync(string home, string data, string core, string node, string address, bool mediaMtx)
+{
+  try
+  {
+    var config = StackConfig.Load(home, data);
+    Roles.RequireNodeName(node, "--name");
+    if (!core.Contains(':')) core += ":" + config.Require("WEB_VMS_PORT");
+    var package = Path.Combine(config.Data, $"node-{node}.tar.gz");
+    try
+    {
+      await Distributed.FetchPackageAsync(core, node, address, mediaMtx,
+        Environment.GetEnvironmentVariable("TAVMS_JOIN_USER"), Environment.GetEnvironmentVariable("TAVMS_JOIN_PASSWORD"), package);
+      Distributed.Join(config, package, address, mediaMtx, Console.Out);
+    }
+    finally
+    {
+      File.Delete(package);
+    }
     return 0;
   }
   catch (Exception ex)

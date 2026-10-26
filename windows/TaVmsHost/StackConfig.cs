@@ -72,14 +72,17 @@ internal sealed class StackConfig
     env["TAVMS_NODE_SUFFIX"] = role == Role.Node
       ? "-" + Roles.RequireNodeName(Value(env, "TAVMS_NODE_NAME"), "TAVMS_NODE_NAME")
       : "";
-    // The nodes this deployment knows of, one pair each: on the core, those it made packages for;
-    // on a node, those its package named. VmsCfg on the core is what reads them.
+    // A core made before VmsCfg kept the deployment's nodes lists here those it made packages for,
+    // and VmsCfg takes them into its registry; a node that joins now is VmsCfg's alone.
     var nodes = Path.Combine(DistributedDirOf(data), "nodes");
     if (File.Exists(nodes))
     {
       var pairs = File.ReadAllLines(nodes).Select(l => l.Trim()).Where(l => l.Length > 0);
       env["MEDIA_SERVER_PAIRS"] = string.Join(',', [Value(env, "MEDIA_SERVER_PAIRS"), .. pairs]);
     }
+
+    // Where VmsCfg on the core finds the key it signs joining nodes' tokens with, and shared.env.
+    if (role == Role.Core) env["TAVMS_DISTRIBUTED_DIR"] = DistributedDirOf(data);
 
     var services = Manifest.Load(ManifestPath(home));
     var config = new StackConfig

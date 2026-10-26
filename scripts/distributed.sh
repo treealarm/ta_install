@@ -5,11 +5,14 @@
 #
 #   On the core:
 #     scripts/distributed.sh core <this machine's address>
-#     scripts/distributed.sh package <node name>        -> data/distributed/node-<name>.tar.gz
 #     scripts/distributed.sh up | down | ps | logs ...    (compose with the right files)
-#   On a node, with the package copied over:
-#     scripts/distributed.sh join <package> <this machine's address> [--no-mediamtx]
+#   On a node, asking the core's web for its package (VmsCfg keeps the deployment's nodes):
+#     scripts/distributed.sh join --core <core address[:web port]> --name <node> <this machine's address> [--no-mediamtx]
 #     scripts/distributed.sh up
+#   or with a package file made in the core's web (Administration, Deployment, "+"):
+#     scripts/distributed.sh join <package> <this machine's address> [--no-mediamtx]
+#   Once the administrator has closed enrollment there, joining takes an administrator's user name
+#   and password: TAVMS_JOIN_USER and TAVMS_JOIN_PASSWORD, or asked for on the terminal.
 #   A node runs its own MediaMTX unless joined with --no-mediamtx, its cameras then publishing to
 #   the core's; and a web of its own, logging users in at the core's Keycloak.
 #
@@ -22,7 +25,7 @@
 #   - PostgreSQL, RabbitMQ, Dapr placement and Keycloak on the core, and every MediaMTX, behind their
 #     passwords and the firewall (see README.md).
 #
-# Needs openssl, jq and docker compose.
+# Needs openssl, jq, curl, perl and docker compose.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -31,13 +34,6 @@ COMPOSE=(docker compose -f docker-compose.distributed.yml --env-file .env --env-
 # Sentry's own SPIFFE id, which every token names as its audience; and the trust domains Dapr uses
 # by default outside Kubernetes: "localhost" for the control plane, "public" for applications.
 SENTRY_ID=spiffe://localhost/ns/default/dapr-sentry
-# What a node takes from its core (core.env in the package): the credentials and ports of the
-# core's PostgreSQL, RabbitMQ, MediaMTX and Keycloak, and the key every web seals WHEP sessions
-# with. Nothing else: the rest of an installation's settings are
-# the same in every release or belong to the machine (paths, hosts), and a Windows core's would be
-# Windows paths. TaVmsHost on Windows writes and reads the same list.
-CORE_KEYS='^(POSTGRES_(PORT|USER|PASSWORD)|POSTGRES_[A-Z0-9_]+_DB|RABBITMQ_(PORT|DEFAULT_USER|DEFAULT_PASS)|VMS_MEDIAMTX_(PUBLISH|READ)_(USER|PASS)|KEYCLOAK_(PORT|ADMIN_USER|ADMIN_PASSWORD|REALM_NAME|CLIENT_ID)|VMS_WHEP_SESSION_KEY)[[:space:]]*='
-
 die() { echo "error: $*" >&2; exit 1; }
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 # A value of this machine's environment: .env, overridden by the core's values on a node (core.env,
@@ -48,17 +44,17 @@ env_value() {
     sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" | tail -n1 | tr -d '"'
 }
 
-# A JWT for Sentry's jwks validator, signed with the deployment's Ed25519 key. No "exp": the token is
-# the credential of a machine's sidecar, and what revokes it is a new key in the JWKS.
+# A JWT for Sentry's jwks validator, signed with the deployment's ES256 key: the algorithm the core's
+# VmsCfg signs node packages with (.NET has no Ed25519), and the Windows core's. No "exp": the token
+# is the credential of a machine's sidecar, and what revokes it is a new key in the JWKS.
 mint_token() {
-  local header payload signature signed
-  header=$(printf '{"alg":"EdDSA","typ":"JWT","kid":"tavms"}' | b64url)
+  local header payload signature
+  header=$(printf '{"alg":"ES256","typ":"JWT","kid":"tavms"}' | b64url)
   payload=$(printf '{"sub":"%s","aud":["%s"],"iat":%s}' "$1" "$SENTRY_ID" "$(date +%s)" | b64url)
-  # A file, not a pipe: Ed25519 signs the whole message at once, and openssl has to know its size.
-  signed=$(mktemp)
-  printf '%s.%s' "$header" "$payload" > "$signed"
-  signature=$(openssl pkeyutl -sign -rawin -inkey "$DIST/core/jwt.key" -in "$signed" | b64url)
-  rm -f "$signed"
+  # openssl signs ECDSA as a DER sequence of r and s; a JWS wants the two as 32 bytes each.
+  signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$DIST/core/jwt.key" |
+    openssl asn1parse -inform DER | awk -F: '/INTEGER/ { printf "%64s", $NF }' | tr ' ' 0 |
+    perl -pe 's/([0-9A-Fa-f]{2})/chr(hex($1))/ge' | b64url)
   printf '%s.%s.%s' "$header" "$payload" "$signature"
 }
 
@@ -97,10 +93,10 @@ spec:
 EOF
 }
 
-# The state store and the bus, at the core's address. Dapr does not expand variables in component
-# metadata, so these are written out with the values from .env.
+# The state store and the bus, at the core's PostgreSQL and RabbitMQ. Dapr does not expand variables
+# in component metadata, so these are written out with the values from .env.
 write_components() {
-  local host=$1 user pass db ruser rpass port rport
+  local host=$1 rhost=${2:-$1} user pass db ruser rpass port rport
   user=$(env_value POSTGRES_USER); pass=$(env_value POSTGRES_PASSWORD); db=$(env_value POSTGRES_STATE_DB)
   port=$(env_value POSTGRES_PORT); ruser=$(env_value RABBITMQ_DEFAULT_USER); rpass=$(env_value RABBITMQ_DEFAULT_PASS)
   rport=$(env_value RABBITMQ_PORT)
@@ -131,7 +127,7 @@ spec:
   version: v1
   metadata:
   - name: connectionString
-    value: "amqp://$ruser:$rpass@$host:$rport/"
+    value: "amqp://$ruser:$rpass@$rhost:$rport/"
   - name: durable
     value: "true"
   - name: deletedWhenUnused
@@ -180,10 +176,14 @@ cmd_core() {
       -days 3650 -extfile <(printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyCertSign,cRLSign\n') \
       -out "$DIST/sentry/issuer.crt" 2>/dev/null
 
-  # The key that signs the sidecars' tokens, and the JWKS Sentry checks them against.
-  openssl genpkey -algorithm ed25519 -out "$DIST/core/jwt.key"
-  local x
-  x=$(openssl pkey -in "$DIST/core/jwt.key" -pubout -outform DER | tail -c 32 | b64url)
+  # The key that signs the sidecars' tokens, and the JWKS Sentry checks them against. VmsCfg reads it
+  # too, to sign the tokens of the nodes that join later (TAVMS_DISTRIBUTED_DIR).
+  openssl ecparam -name prime256v1 -genkey -noout -out "$DIST/core/jwt.key"
+  local point x y
+  point=$(mktemp)
+  openssl ec -in "$DIST/core/jwt.key" -pubout -outform DER 2>/dev/null | tail -c 64 > "$point"
+  x=$(head -c 32 "$point" | b64url); y=$(tail -c 32 "$point" | b64url)
+  rm -f "$point"
   cat > "$DIST/sentry/config.yaml" <<EOF
 kind: Configuration
 apiVersion: dapr.io/v1alpha1
@@ -197,7 +197,7 @@ spec:
     tokenValidators:
       - name: jwks
         options:
-          source: '{"keys":[{"kty":"OKP","crv":"Ed25519","x":"$x","kid":"tavms","alg":"EdDSA","use":"sig"}]}'
+          source: '{"keys":[{"kty":"EC","crv":"P-256","x":"$x","y":"$y","kid":"tavms","alg":"ES256","use":"sig"}]}'
 EOF
 
   # Shared by every machine of the deployment: the core's address, Consul's gossip key and the root
@@ -218,11 +218,13 @@ EOF
 write_machine_env() {
   local role=$1 address=$2 node=$3 mediamtx=${4:-1} pairs
   pairs="vms:vmsfs:vmsonvif:vmslogger"
+  # Nodes that joined a core made before VmsCfg kept the deployment's nodes, listed by the package
+  # command it had then. A node joining now is VmsCfg's alone and is not added here.
   [[ -f "$DIST/nodes" ]] && pairs+=$(sed 's/^/,/' "$DIST/nodes" | tr -d '\n')
   {
     cat "$DIST/shared.env"
-    # A profile, not COMPOSE_PROFILES: the package step asks compose for the node profile on the
-    # core, and must not get the core's sidecars (and tokens) with it.
+    # A profile, not COMPOSE_PROFILES: `up` picks the profiles itself (node-mediamtx), and
+    # `sidecars` asks compose for one profile at a time.
     echo "TAVMS_ROLE=$role"
     # The containers run as the owner of $DIST, whose keys and tokens nobody else may read.
     echo "TAVMS_UID=$(id -u)"
@@ -233,12 +235,16 @@ write_machine_env() {
     # Whether this machine runs MediaMTX: always on the core; a node's, unless --no-mediamtx
     # (`up` adds the profile node-mediamtx).
     echo "TAVMS_MEDIAMTX=$mediamtx"
+    # Where the core's VmsCfg finds the keys it signs nodes' tokens with, inside its container.
+    if [[ $role == core ]]; then echo "TAVMS_DISTRIBUTED_DIR=/data/distributed"; fi
     # What differs from .env, as windows/config/windows.env is for Windows: no compose network to
     # name hosts by, so the core's address; the ports Dapr's control plane listens on; and what a
-    # distributed deployment does not run yet.
+    # distributed deployment does not run yet. A node's package names each of the core's services
+    # in core.env, which comes last and wins; these are for a package from before it did.
     local core
     core=$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")
     echo "POSTGRES_HOST=$core"
+    echo "RABBITMQ_HOST=$core"
     echo "VMS_MTX_HOST=$core"
     # The core's Keycloak, on its address (KC_HTTP_HOST), and on a node at the core's port.
     echo "KEYCLOAK_URL=http://$core:$(env_value KEYCLOAK_PORT)"
@@ -252,59 +258,59 @@ write_machine_env() {
   } > "$DIST/distributed.env"
 }
 
-cmd_package() {
-  local node=${1:?usage: distributed.sh package <node name>}
-  [[ -f "$DIST/core/jwt.key" ]] || die "not a core: run 'distributed.sh core' first"
-  [[ "$node" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "node name: lower-case letters, digits and '-'"
-  local pair="vms-$node:vmsfs-$node:vmsonvif-$node:vmslogger-$node"
-  grep -qxF "$pair" "$DIST/nodes" 2>/dev/null || echo "$pair" >> "$DIST/nodes"
-  write_machine_env core "$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")" ""
-
-  local tmp
-  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
-  umask 077
-  mkdir -p "$tmp/tokens"
-  cp "$DIST/shared.env" "$DIST/nodes" "$tmp/"
-  grep -E "$CORE_KEYS" .env > "$tmp/core.env" || die "no PostgreSQL/RabbitMQ settings in .env"
-  echo "$node" > "$tmp/name"
-  # The node's sidecars, by the app ids the compose file gives them under this name.
-  while read -r id _; do
-    mint_token "spiffe://public/ns/default/$id" > "$tmp/tokens/$id.token"
-  done < <(sidecars node "$node")
-  tar -czf "$DIST/node-$node.tar.gz" -C "$tmp" .
-  echo "wrote $DIST/node-$node.tar.gz: copy it to the node and run 'distributed.sh join' there."
-  # MEDIA_SERVER_PAIRS changed in distributed.env, and compose recreates whatever reads it.
-  echo "Then run 'scripts/distributed.sh up -d' here, so that the core's services learn the node."
+# Asks the core's web for this node's package (POST /api/deployment/join) and writes it to $1.
+fetch_package() {
+  local out=$1 core=$2 name=$3 address=$4 mediamtx=$5 url status body user pass
+  [[ $core == *:* ]] || core="$core:$(env_value WEB_VMS_PORT)"
+  url="http://$core/api/deployment"
+  body=$(curl -fsS --max-time 10 "$url") || die "no TreeAlarm VMS web answers at $url"
+  [[ $(jq -r .distributed <<<"$body") == true ]] || die "$core is not the core of a deployment over several machines"
+  user=${TAVMS_JOIN_USER:-}; pass=${TAVMS_JOIN_PASSWORD:-}
+  if [[ $(jq -r .enrollmentOpen <<<"$body") != true && -z $user ]]; then
+    [[ -t 0 ]] || die "enrollment is closed at $core: set TAVMS_JOIN_USER and TAVMS_JOIN_PASSWORD to an administrator's"
+    read -rp "Enrollment is closed at $core. Administrator: " user
+    read -rsp "Password: " pass; echo
+  fi
+  status=$(jq -n --arg name "$name" --arg address "$address" --argjson mediaMtx "$([[ $mediamtx == 1 ]] && echo true || echo false)" \
+      --arg username "$user" --arg password "$pass" \
+      '{name: $name, address: $address, mediaMtx: $mediaMtx, username: $username, password: $password}' |
+    curl -sS --max-time 30 -o "$out" -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @- "$url/join") ||
+    die "$url/join did not answer"
+  [[ $status == 200 ]] || die "the core refused: $(jq -r '.error // .' "$out" 2>/dev/null || cat "$out")"
 }
 
 cmd_join() {
-  local package=${1:?usage: distributed.sh join <package> <this machine address> [--no-mediamtx]} address=${2:?this machine address}
-  local mediamtx=1
-  case "${3:-}" in
-    "") ;;
-    --no-mediamtx) mediamtx=0 ;;
-    *) die "unknown option '$3'" ;;
-  esac
+  local usage="usage: distributed.sh join (<package> | --core <core address[:port]> --name <node>) <this machine address> [--no-mediamtx]"
+  local package="" core="" name="" address="" mediamtx=1
+  while (($#)); do
+    case "$1" in
+      --core) core=${2:?$usage}; shift 2 ;;
+      --name) name=${2:?$usage}; shift 2 ;;
+      --no-mediamtx) mediamtx=0; shift ;;
+      -*) die "unknown option '$1'" ;;
+      *) if [[ -z $core && -z $package ]]; then package=$1; elif [[ -z $address ]]; then address=$1; else die "$usage"; fi; shift ;;
+    esac
+  done
+  [[ -n $address && ( -n $package || ( -n $core && -n $name ) ) ]] || die "$usage"
   [[ ! -e "$DIST" ]] || die "$DIST exists: this machine is part of a deployment already"
   umask 077
+  if [[ -n $core ]]; then
+    package=$(mktemp); trap 'rm -f "$package"' EXIT
+    fetch_package "$package" "$core" "$name" "$address" "$mediamtx"
+  fi
   mkdir -p "$DIST/tokens"
   tar -xzf "$package" -C "$DIST"
   # The core's passwords and ports go into distributed.env (write_machine_env), on top of this
   # machine's own .env, so that this node's services and components use the same as the core's.
   [[ -f "$DIST/core.env" ]] || die "$package has no core.env"
   write_machine_env node "$address" "$(cat "$DIST/name")" "$mediamtx"
-  write_components "$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")"
+  write_components "$(env_value POSTGRES_HOST)" "$(env_value RABBITMQ_HOST)"
   write_sidecars node "$(cat "$DIST/name")"
   echo "node ready: $DIST. Start it with: scripts/distributed.sh up"
-  if [[ $mediamtx == 1 ]]; then
-    echo "For its cameras' video to stay on this machine, add its MediaMTX in the web interface"
-    echo "(Administration, MediaMTX: host $address, node vms-$(cat "$DIST/name"))."
-  fi
 }
 
 case "${1:-}" in
   core) shift; cmd_core "$@" ;;
-  package) shift; cmd_package "$@" ;;
   join) shift; cmd_join "$@" ;;
   up|down|ps|logs|pull|restart|stop|start|config|exec)
     [[ -f "$DIST/distributed.env" ]] || die "run 'distributed.sh core' or 'distributed.sh join' first"

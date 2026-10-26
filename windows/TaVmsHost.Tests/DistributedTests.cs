@@ -7,8 +7,8 @@ using System.Text.Json;
 
 namespace TaVmsHost.Tests;
 
-// A core and a node made the way the installer makes them: TaVmsHost core on one installation,
-// package there, join on another.
+// A core and a node made the way the installer makes them: TaVmsHost core on one installation, the
+// node's package as the core's VmsCfg hands it out, join on another.
 public sealed class DistributedTests : IDisposable
 {
   private const string CoreAddress = "192.168.1.10";
@@ -22,7 +22,7 @@ public sealed class DistributedTests : IDisposable
     // letters and digits (Install-TaVms.ps1, New-Secret).
     _core.AppendSite("POSTGRES_PASSWORD=core-pg-pass");
     Distributed.Core(_core.Load(), CoreAddress, TextWriter.Null);
-    var package = Distributed.Package(_core.Load(), "hall", TextWriter.Null);
+    var package = CorePackage.Make(_core.Load(), "hall", _core.Data);
     // A node's site.env is the installer's header and storage paths only: its passwords are the core's.
     File.WriteAllLines(_node.SiteEnv, ["# site.env of a node"]);
     Distributed.Join(_node.Load(), package, NodeAddress, mediaMtx: true, TextWriter.Null);
@@ -71,8 +71,27 @@ public sealed class DistributedTests : IDisposable
     Assert.Equal("vms", config.App(App(config, "vmsonvif")).Env["OWN_SERVER_ID"]);
     Assert.Equal(CoreAddress, config.Env["VMS_MTX_HOST"]);
     Assert.Equal("127.0.0.1", config.Env["POSTGRES_HOST"]);
+    // Its own node only: the nodes that join are VmsCfg's, in its database.
+    Assert.Equal("vms:vmsfs:vmsonvif:vmslogger", config.Env["MEDIA_SERVER_PAIRS"]);
+  }
+
+  [Fact]
+  public void The_cores_vmscfg_finds_the_key_it_signs_joining_nodes_with()
+  {
+    var core = _core.Load();
+    var dir = core.App(App(core, "vmscfg")).Env["TAVMS_DISTRIBUTED_DIR"];
+    Assert.Equal(core.DistributedDir, dir);
+    Assert.True(File.Exists(Path.Combine(dir, "core", "jwt.key")));
+    Assert.True(File.Exists(Path.Combine(dir, "shared.env")));
+    Assert.False(_node.Load().Env.ContainsKey("TAVMS_DISTRIBUTED_DIR"));
+  }
+
+  [Fact]
+  public void A_core_made_before_vmscfg_kept_the_nodes_still_names_the_ones_it_packaged()
+  {
+    File.WriteAllLines(Path.Combine(_core.Load().DistributedDir, "nodes"), ["vms-hall:vmsfs-hall:vmsonvif-hall:vmslogger-hall"]);
     Assert.Equal("vms:vmsfs:vmsonvif:vmslogger,vms-hall:vmsfs-hall:vmsonvif-hall:vmslogger-hall",
-      config.Env["MEDIA_SERVER_PAIRS"]);
+      _core.Load().Env["MEDIA_SERVER_PAIRS"]);
   }
 
   [Fact]
@@ -81,8 +100,10 @@ public sealed class DistributedTests : IDisposable
     var config = _node.Load();
     Assert.Equal(Role.Node, config.Role);
     Assert.Equal(["consul-agent", "mediamtx"], config.Manifest.Infrastructure.Select(i => i.Name));
+    // Exactly the app ids the core's VmsCfg signs tokens for (CorePackage.AppIdPrefixes).
     Assert.Equal(["vmslogger-hall", "vmsfs-hall", "vmsonvif-hall", "vmsonvif-actors-hall", "vms-hall", "web-vms-hall"],
       config.Manifest.Apps.Select(a => a.AppId));
+    Assert.Equal(CorePackage.AppIdPrefixes.Select(p => $"{p}-hall").Order(), config.Manifest.Apps.Select(a => a.AppId).Order());
     Assert.Equal("vms-hall", config.App(App(config, "vmsonvif-actors-hall")).Env["OWN_SERVER_ID"]);
     Assert.Equal("vms-hall.dapr", App(config, "vms-hall").SidecarName);
 
@@ -105,6 +126,28 @@ public sealed class DistributedTests : IDisposable
       Assert.Equal(core.Env[key], node.Env[key]);
     Assert.Contains($"host='{CoreAddress}' port=5433", DaprComponents.StateStore(node));
     Assert.Contains($"@{CoreAddress}:5673/", DaprComponents.PubSub(node));
+  }
+
+  [Fact]
+  public void A_node_finds_each_of_the_cores_services_where_its_package_says()
+  {
+    // A core whose services sit behind addresses of their own, as in a cluster.
+    using var other = new Installation();
+    File.WriteAllLines(other.SiteEnv, ["# a node"]);
+    var package = CorePackage.Make(_core.Load(), "yard", _core.Data, new Dictionary<string, string>
+    {
+      ["POSTGRES_HOST"] = "10.0.0.5", ["RABBITMQ_HOST"] = "10.0.0.6", ["VMS_MTX_HOST"] = "10.0.0.7",
+      ["KEYCLOAK_URL"] = "http://10.0.0.8:8080",
+    });
+    Distributed.Join(other.Load(), package, NodeAddress, mediaMtx: true, TextWriter.Null);
+
+    var node = other.Load();
+    Assert.Equal("10.0.0.5", node.Env["POSTGRES_HOST"]);
+    Assert.Equal("10.0.0.6", node.Env["RABBITMQ_HOST"]);
+    Assert.Equal("10.0.0.7", node.Env["VMS_MTX_HOST"]);
+    Assert.Equal("http://10.0.0.8:8080", node.App(App(node, "web-vms-yard")).Env["KEYCLOAK_URL"]);
+    Assert.Contains("host='10.0.0.5'", DaprComponents.StateStore(node));
+    Assert.Contains("@10.0.0.6:5673/", DaprComponents.PubSub(node));
   }
 
   [Fact]
@@ -194,30 +237,6 @@ public sealed class DistributedTests : IDisposable
   }
 
   [Fact]
-  public void The_package_is_what_a_linux_node_reads()
-  {
-    var files = NodePackage.Read(Path.Combine(_core.Load().DistributedDir, "node-hall.tar.gz"));
-    Assert.All(files.Values, text => Assert.DoesNotContain('\r', text));
-    Assert.Equal("hall\n", files["name"]);
-    // Every key a node takes from its core, and nothing else: no Windows paths, no Keycloak.
-    var keys = files["core.env"].Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Split('=')[0]).ToList();
-    Assert.All(keys, k => Assert.Matches(NodePackage.CoreKeys(), k));
-    Assert.Contains("POSTGRES_PASSWORD", keys);
-    Assert.Contains("VMS_MEDIAMTX_READ_PASS", keys);
-    // shared.env as distributed.sh writes it: CORE_ADDRESS on its own line, for sed.
-    Assert.StartsWith($"CORE_ADDRESS={CoreAddress}\n", files["shared.env"]);
-  }
-
-  [Fact]
-  public void A_second_package_for_the_same_node_lists_it_once()
-  {
-    Distributed.Package(_core.Load(), "hall", TextWriter.Null);
-    Distributed.Package(_core.Load(), "yard", TextWriter.Null);
-    Assert.Equal(["vms-hall:vmsfs-hall:vmsonvif-hall:vmslogger-hall", "vms-yard:vmsfs-yard:vmsonvif-yard:vmslogger-yard"],
-      File.ReadAllLines(Path.Combine(_core.Load().DistributedDir, "nodes")));
-  }
-
-  [Fact]
   public void Every_machine_logs_users_in_at_the_cores_keycloak()
   {
     var core = _core.Load();
@@ -240,7 +259,7 @@ public sealed class DistributedTests : IDisposable
   {
     using var other = new Installation();
     File.WriteAllLines(other.SiteEnv, ["# a node"]);
-    var package = Distributed.Package(_core.Load(), "yard", TextWriter.Null);
+    var package = CorePackage.Make(_core.Load(), "yard", _core.Data);
     Distributed.Join(other.Load(), package, NodeAddress, mediaMtx: false, TextWriter.Null);
     Assert.Equal(["consul-agent"], other.Load().Manifest.Infrastructure.Select(i => i.Name));
   }
@@ -257,9 +276,8 @@ public sealed class DistributedTests : IDisposable
   public void Neither_machine_becomes_a_core_or_joins_twice()
   {
     Assert.Throws<InvalidOperationException>(() => Distributed.Core(_core.Load(), CoreAddress, TextWriter.Null));
-    var package = Path.Combine(_core.Load().DistributedDir, "node-hall.tar.gz");
+    var package = CorePackage.Make(_core.Load(), "hall", _core.Data);
     Assert.Throws<InvalidOperationException>(() => Distributed.Join(_node.Load(), package, NodeAddress, mediaMtx: true, TextWriter.Null));
-    Assert.Throws<InvalidOperationException>(() => Distributed.Package(_node.Load(), "yard", TextWriter.Null));
     Assert.Throws<ArgumentException>(() => Distributed.Core(new Installation().Load(), "127.0.0.1", TextWriter.Null));
   }
 
@@ -282,8 +300,9 @@ public sealed class DistributedTests : IDisposable
   [Fact]
   public void A_package_from_a_linux_core_joins_a_windows_node()
   {
-    // The layout distributed.sh's tar makes: "./" entries, a directory record, core.env lines
-    // copied from .env with their quotes.
+    // The layout distributed.sh's tar made before VmsCfg made the packages: "./" entries, a
+    // directory record, a list of nodes, core.env lines copied from .env with their quotes and no
+    // service addresses. A node joined with one then is still joined with it.
     using var other = new Installation();
     var shared = File.ReadAllText(Path.Combine(_core.Load().DistributedDir, "shared.env"));
     var linux = Path.Combine(other.Data, "node-yard.tar.gz");

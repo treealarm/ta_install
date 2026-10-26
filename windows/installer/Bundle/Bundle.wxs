@@ -10,7 +10,11 @@
   The variable names are case-sensitive. An upgrade keeps both folders as they are.
   A deployment over several machines (windows/README.md), in the wizard's Role page or unattended:
     ta_vms-setup-x64.exe /quiet /norestart Role=core Address=<this machine's address>
+    ta_vms-setup-x64.exe /quiet /norestart Role=node Address=<this machine's address> CoreAddress=<the core's> [NodeName=<name>]
     ta_vms-setup-x64.exe /quiet /norestart Role=node Address=<this machine's address> NodePackage=<file>
+  CoreAddress asks the core's web for the node's package, which works while its enrollment is open;
+  once the administrator has closed it, NodePackage takes a package made there (Administration,
+  Deployment). The wizard asks the core itself, with an administrator's password if need be.
   A node runs a MediaMTX of its own unless given NodeMediaMtx=0; its cameras then publish to the core's.
   An upgrade keeps the role.
 -->
@@ -60,6 +64,13 @@
     <Variable Name="StorageFolder" Type="formatted" Value="[CommonAppDataFolder]TreeAlarm\VMS" bal:Overridable="yes" />
     <Variable Name="Role" bal:Overridable="yes" />
     <Variable Name="Address" bal:Overridable="yes" />
+    <Variable Name="CoreAddress" bal:Overridable="yes" />
+    <Variable Name="NodeName" bal:Overridable="yes" />
+    <!-- The wizard's Role page, for a node of a core that has closed enrollment: used there to ask
+         the core for the package (BAFunctions.dll) and passed to nothing. Hidden keeps the password
+         out of the bundle's log, where the theme would otherwise write it on leaving the page. -->
+    <Variable Name="JoinUser" />
+    <Variable Name="JoinPassword" Hidden="yes" />
     <Variable Name="NodePackage" bal:Overridable="yes" />
     <Variable Name="NodeMediaMtx" Type="numeric" Value="1" bal:Overridable="yes" />
 
@@ -134,6 +145,8 @@
         <MsiProperty Name="STORAGEPATH" Value="[StorageFolder]" />
         <MsiProperty Name="TAVMSROLE" Value="[Role]" />
         <MsiProperty Name="TAVMSADDRESS" Value="[Address]" />
+        <MsiProperty Name="TAVMSCOREADDRESS" Value="[CoreAddress]" />
+        <MsiProperty Name="TAVMSNODENAME" Value="[NodeName]" />
         <MsiProperty Name="NODEPACKAGE" Value="[NodePackage]" />
         <MsiProperty Name="NODEMEDIAMTX" Value="[NodeMediaMtx]" />
       </MsiPackage>

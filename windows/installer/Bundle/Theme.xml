@@ -10,7 +10,7 @@
     <Font Id="2" Height="-22" Weight="500" Foreground="graytext">Segoe UI</Font>
     <Font Id="3" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
 
-    <Window Width="485" Height="300" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
+    <Window Width="485" Height="390" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
         <ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="logo.png" Visible="yes"/>
         <Label X="80" Y="11" Width="-11" Height="64" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
 
@@ -67,8 +67,10 @@
             </Button>
         </Page>
         <!-- What this computer is in a deployment. A radio button sets Role at once and redraws the
-             page, so the conditions below follow it. The address list and the Browse button are
-             BAFunctions.dll's (../BAFunctions); OK writes the chosen address to Address there. -->
+             page, so the conditions below follow it. BAFunctions.dll (../BAFunctions) fills the
+             address list and writes the chosen address to Address on OK; for a node it fills the list
+             of cores it finds on this computer's networks, says under it whether the chosen core
+             takes a node without a password, and on OK asks the core for the node's package. -->
         <Page Name="Role">
             <Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">#(loc.RoleHeader)</Label>
             <RadioButtons Name="Role">
@@ -78,11 +80,19 @@
             </RadioButtons>
             <Label X="11" Y="183" Width="180" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;core&quot; OR Role = &quot;node&quot;">#(loc.RoleAddressLabel)</Label>
             <Combobox Name="AddressList" X="195" Y="180" Width="-11" Height="120" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;core&quot; OR Role = &quot;node&quot;" />
-            <Label X="11" Y="207" Width="-11" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RolePackageLabel)</Label>
-            <Editbox Name="NodePackage" X="11" Y="227" Width="-91" Height="21" TabStop="yes" FontId="3" FileSystemAutoComplete="yes" VisibleCondition="Role = &quot;node&quot;" />
-            <Button Name="NodePackageBrowseButton" X="-11" Y="226" Width="75" Height="23" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;">#(loc.OptionsBrowseButton)</Button>
-            <!-- Bound to the variable of the same name, as NodePackage is: 1 or 0 (Bundle.wxs). -->
-            <Checkbox Name="NodeMediaMtx" X="11" Y="256" Width="290" Height="17" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleMediaMtx)</Checkbox>
+            <Label X="11" Y="210" Width="180" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleCoreListLabel)</Label>
+            <Combobox Name="CoreList" X="195" Y="207" Width="-11" Height="120" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;" />
+            <Label X="11" Y="236" Width="180" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleCoreAddressLabel)</Label>
+            <Editbox Name="CoreAddress" X="195" Y="233" Width="-11" Height="21" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;" />
+            <Label Name="CoreStatus" X="195" Y="257" Width="-11" Height="30" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;" />
+            <Label X="11" Y="292" Width="180" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleNodeNameLabel)</Label>
+            <Editbox Name="NodeName" X="195" Y="289" Width="-11" Height="21" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;" />
+            <Label X="11" Y="318" Width="180" Height="17" FontId="3" DisablePrefix="yes" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleAdminLabel)</Label>
+            <Editbox Name="JoinUser" X="195" Y="315" Width="110" Height="21" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;" />
+            <!-- A password box: BAFunctions.dll sets its password character. Its variable is Hidden. -->
+            <Editbox Name="JoinPassword" X="311" Y="315" Width="-11" Height="21" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;" />
+            <!-- Bound to the variable of the same name: 1 or 0 (Bundle.wxs). -->
+            <Checkbox Name="NodeMediaMtx" X="11" Y="342" Width="290" Height="17" TabStop="yes" FontId="3" VisibleCondition="Role = &quot;node&quot;">#(loc.RoleMediaMtx)</Checkbox>
             <Button Name="RoleOkButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
                 <Text>#(loc.OptionsOkButton)</Text>
                 <ChangePageAction Page="Install" />

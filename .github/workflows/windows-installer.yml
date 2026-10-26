@@ -330,7 +330,8 @@ jobs:
   # A core of a deployment over several machines, on one runner: Consul's server, Sentry and
   # placement with TLS, every sidecar resolving through Consul with a certificate Sentry signed.
   # The calls below cross sidecars as in the smoke test, so a 200 means all of that works. A node
-  # cannot be tried here (it would need a second machine); its package is made, at least.
+  # cannot be tried here (it would need a second machine); the core enrolls one over its web, at
+  # least, with enrollment open and closed, and its VmsCfg signs the node's tokens.
   core:
     needs: installer
     runs-on: windows-latest
@@ -404,15 +405,38 @@ jobs:
           $client = New-Object Net.Sockets.TcpClient
           try { $client.Connect($address, 3600); throw "web-vms's sidecar API answers on $address" } catch [Net.Sockets.SocketException] { "ok   sidecar API not on $address" } finally { $client.Dispose() }
 
-          & $hostExe package ci
-          if ($LASTEXITCODE -ne 0) { throw 'TaVmsHost package failed' }
-          $package = 'C:\ProgramData\TreeAlarm\VMS\distributed\node-ci.tar.gz'
+          # A node joins by asking the core's web, anonymously while enrollment is open.
+          $join = @{ name = 'ci'; address = '10.0.0.2'; mediaMtx = $true } | ConvertTo-Json
+          $deployment = Invoke-RestMethod "$base/api/deployment"
+          if (-not $deployment.distributed -or -not $deployment.enrollmentOpen) { throw "deployment: $($deployment | ConvertTo-Json -Compress)" }
+          $package = Join-Path $env:RUNNER_TEMP 'node-ci.tar.gz'
+          Invoke-WebRequest "$base/api/deployment/join" -Method Post -ContentType 'application/json' -Body $join -OutFile $package
           $listing = tar -tzf $package
           $listing
-          foreach ($entry in 'shared.env', 'core.env', 'nodes', 'name', 'tokens/vms-ci.token') {
+          foreach ($entry in 'shared.env', 'core.env', 'name', 'tokens/vms-ci.token', 'tokens/web-vms-ci.token') {
             if (-not ($listing -contains $entry)) { throw "the package has no $entry" }
           }
-          "ok   node package"
+          "ok   node package from the web, while enrollment is open"
+          $auth = @{ Authorization = "Bearer $token" }
+          $nodes = Invoke-RestMethod "$base/api/deployment/nodes" -Headers $auth
+          $nodes | Format-Table serverId, name, address, mediaMtx, configured
+          if (-not ($nodes | Where-Object { $_.serverId -eq 'vms-ci' -and -not $_.configured })) { throw 'vms-ci is not among the nodes' }
+          if (-not ((Invoke-RestMethod "$base/api/media-mtx/servers" -Headers $auth) | Where-Object serverId -eq 'vms-ci')) { throw 'no MediaMTX for vms-ci' }
+          # Closed: no package without an administrator's password.
+          Invoke-RestMethod "$base/api/deployment/enrollment" -Method Put -Headers $auth -ContentType 'application/json' -Body '{"open":false}' | Out-Null
+          $closed = @{ name = 'ci2'; address = '10.0.0.3'; mediaMtx = $false }
+          $r = Invoke-WebRequest "$base/api/deployment/join" -Method Post -ContentType 'application/json' -Body ($closed | ConvertTo-Json) -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 401) { throw "closed enrollment without a password answered $($r.StatusCode)" }
+          $r = Invoke-WebRequest "$base/api/deployment/join" -Method Post -ContentType 'application/json' -Body ($closed + @{ username = 'admin'; password = 'wrong' } | ConvertTo-Json) -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 401) { throw "closed enrollment with a wrong password answered $($r.StatusCode)" }
+          $r = Invoke-WebRequest "$base/api/deployment/join" -Method Post -ContentType 'application/json' -Body ($closed + @{ username = 'admin'; password = 'admin' } | ConvertTo-Json) -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 200) { throw "closed enrollment with the administrator's password answered $($r.StatusCode): $($r.Content)" }
+          "ok   closed enrollment: 401 without the administrator's password, the package with it"
+          # A node without cameras goes; the core's own does not.
+          Invoke-RestMethod "$base/api/deployment/nodes/vms-ci2" -Method Delete -Headers $auth | Out-Null
+          $r = Invoke-WebRequest "$base/api/deployment/nodes/vms" -Method Delete -Headers $auth -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 409) { throw "removing the core's own node answered $($r.StatusCode)" }
+          "ok   node removal"
 
       - name: Collect logs
         if: ${{ always() }}

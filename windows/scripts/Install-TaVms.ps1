@@ -13,7 +13,7 @@
     2. data directories and their ACLs (the services run as LocalService; passwords readable only
        by administrators and the services)
     3. a core or node of a deployment over several machines (-Role): TaVmsHost core, or
-       TaVmsHost join with the node's package, once
+       TaVmsHost join, asking the core's web for the node's package or with a package file, once
     4. PostgreSQL: initdb on first install, service TaVms.Postgres (NetworkService); on the loopback,
        and on a core also at its address for the nodes (not on a node: it uses the core's)
     5. RabbitMQ: service TaVms.RabbitMQ, its user; listeners as PostgreSQL's (not on a node)
@@ -36,8 +36,15 @@ param(
   # A new core or node: this machine's address, the one the other machines reach it at. Asked for
   # rather than guessed: VPN, Hyper-V and remote-desktop adapters give a machine several.
   [string] $Address = '',
-  # A new node: the package its core made for it (TaVmsHost package <name> on a Windows core,
-  # scripts/distributed.sh package <name> on a Linux one), on a local disk.
+  # A new node: the core's address (and the port of its web, if not this installation's), where the
+  # node asks for its package while the core's enrollment is open. The core's VmsCfg registers the
+  # node and makes the package. Once it is closed, a package is needed instead (-NodePackage): an
+  # administrator's password would not stay out of command lines and logs here.
+  [string] $CoreAddress = '',
+  # A new node: its name, which its services carry (vms-<name>, ...). Empty: this computer's name.
+  [string] $NodeName = '',
+  # A new node instead: its package, made in the core's web (Administration, Deployment) or fetched
+  # by the wizard, on a local disk. Deleted once the node has joined: it holds the core's passwords.
   [string] $NodePackage = '',
   # A new node: 0 for no MediaMTX here, its cameras then publishing to the core's. Anything else,
   # empty included, runs one.
@@ -165,14 +172,40 @@ function Initialize-Role {
     Stop-Service $HostService -ErrorAction SilentlyContinue
     Invoke-Checked $hostExe @('core', $Address, '--data', $DataDir)
   }
+  # VmsCfg runs as LocalService and signs the tokens of the nodes that join, with the key a core made
+  # before it did that kept from the services (TaVmsHost core opens it to them on a new core).
+  $signingKey = Join-Path $dist 'core\jwt.key'
+  if ($TheRole -eq 'core' -and (Test-Path $signingKey)) {
+    & icacls.exe $signingKey /grant "${SidLocalService}:(R)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls $signingKey failed: $LASTEXITCODE" }
+  }
   if ($TheRole -eq 'node' -and -not (Test-Path (Join-Path $dist 'shared.env'))) {
-    Write-Step "joining the core with $NodePackage"
     Assert-OwnAddress
-    if (-not $NodePackage -or -not (Test-Path $NodePackage)) { throw "-Role node needs -NodePackage, the package the core made for this node" }
-    $join = @('join', [IO.Path]::GetFullPath($NodePackage), $Address)
+    if ($NodePackage) {
+      Write-Step "joining the core with $NodePackage"
+      if (-not (Test-Path $NodePackage)) { throw "-NodePackage $NodePackage does not exist" }
+      $join = @('join', [IO.Path]::GetFullPath($NodePackage), $Address)
+    } elseif ($CoreAddress) {
+      $name = if ($NodeName) { $NodeName } else { Get-DefaultNodeName }
+      Write-Step "joining the core at $CoreAddress as node '$name'"
+      $join = @('join', '--core', $CoreAddress, '--name', $name, $Address)
+    } else {
+      throw "-Role node needs -CoreAddress, the core to join, or -NodePackage, a package made there"
+    }
     if ($NodeMediaMtx -eq '0') { $join += '--no-mediamtx' }
     Invoke-Checked $hostExe ($join + @('--data', $DataDir))
+    if ($NodePackage) {
+      Remove-Item -LiteralPath $NodePackage -Force -ErrorAction SilentlyContinue
+      Write-Step "deleted $NodePackage: the node has joined, and it held the core's passwords"
+    }
   }
+}
+
+# This computer's name as a node's: lower case, letters, digits and '-' (TaVmsHost's Role.cs).
+function Get-DefaultNodeName {
+  $name = ($env:COMPUTERNAME.ToLowerInvariant() -replace '[^a-z0-9-]', '-').Trim('-')
+  if (-not $name -or $name -eq 'core') { throw "-NodeName is needed: '$env:COMPUTERNAME' cannot name a node" }
+  $name
 }
 
 function New-SiteEnv([string] $path) {
@@ -449,9 +482,8 @@ function Install-HostService {
 # own, so the port is read here, from the same env files the service reads, and a port changed in
 # site.env reaches the shortcuts with the next install.
 function Get-WebUrl {
-  # A node has no web interface of its own: its cameras are seen in the core's.
-  $where = if ($TheRole -eq 'node') { Get-StackValue 'CORE_ADDRESS' } else { 'localhost' }
-  "http://${where}:$(Get-StackValue 'WEB_VMS_PORT')/"
+  # Every machine of a deployment has a web of its own, which shows the whole deployment.
+  "http://localhost:$(Get-StackValue 'WEB_VMS_PORT')/"
 }
 
 function New-WebShortcut {

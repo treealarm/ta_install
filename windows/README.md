@@ -55,21 +55,34 @@ other.
 
 In the wizard, **Role** beside Options on the first page offers standalone (the default), core and
 node: a core and a node pick this machine's address from a list of its IPv4 addresses (those of an
-interface with a default gateway first), a node also the package its core made for it and whether
-it runs a MediaMTX of its own (checked by default; unattended, `NodeMediaMtx=0` for none). The page is
-not there on an upgrade, which keeps the role. Unattended, the same goes on the command line:
+interface with a default gateway first). For a node the page looks for its core on this machine's
+networks — every address of each one's /24 asked over HTTP, as a browser would, no broadcast — and
+lists the cores that answered; another is typed in (`address` or `address:port`). Under it the page
+says whether that core takes a new node without a password. The node's name is this computer's,
+changeable; and it runs a MediaMTX of its own unless unchecked. On OK the wizard asks the core for
+the node's package, with the administrator's user name and password when the core asks for them,
+and stays on the page with the core's answer if it refuses. The page is not there on an upgrade,
+which keeps the role. Unattended:
 
 ```
 rem the core; Address is this machine's own, the one the nodes reach it at
 ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=core Address=192.168.1.10
-rem on the core, for a node named "hall": C:\ProgramData\TreeAlarm\VMS\distributed\node-hall.tar.gz
-"C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe" package hall
-powershell Restart-Service TaVmsHost
-rem on the node, with the package copied to a local disk
+rem a node, while the core's enrollment is open; NodeName defaults to this computer's name
+ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=node Address=192.168.1.20 CoreAddress=192.168.1.10 NodeName=hall
+rem a node once it is closed: a package made in the core's web (Administration, Deployment, "+")
 ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=node Address=192.168.1.20 NodePackage=C:\Temp\node-hall.tar.gz
 ```
 
-The MSI takes the same as `TAVMSROLE`, `TAVMSADDRESS`, `NODEPACKAGE` and `NODEMEDIAMTX`. A standalone installation
+The MSI takes the same as `TAVMSROLE`, `TAVMSADDRESS`, `TAVMSCOREADDRESS`, `TAVMSNODENAME`,
+`NODEPACKAGE` and `NODEMEDIAMTX`. No password goes on a command line: it would land in the
+installation's log. The installer deletes a package once the node has joined with it.
+
+**The core takes nodes in two stages.** While the deployment is being set up, enrollment is open:
+any machine that reaches the core's web joins. Once every server is in, close it in the web
+interface (Administration → Deployment, the switch under the list); from then on a new node needs an
+administrator's user name and password. The same page lists the deployment's servers and removes one
+that has no cameras left; removing one does not revoke its credentials yet. The core needs no
+restart for a new node: its VmsCfg keeps the deployment's nodes. A standalone installation
 can become the core by installing over it with `Role=core`; its MediaMTX server, which named
 `127.0.0.1`, then names the core's address (VmsCfg moves it when it starts). Any other change of
 role takes an uninstall first. An upgrade keeps the role.
@@ -80,10 +93,9 @@ role takes an uninstall first. An upgrade keeps the role.
   uses the core's.
 - **Every machine has the web interface**, and each shows the whole deployment; users log in at the
   core's Keycloak. User administration is on the core only.
-- **A node's MediaMTX** keeps its cameras' live video on the node: add it once in the web
-  interface (Administration → MediaMTX: host = the node's address, node = `vms-hall`; the accounts
-  come filled in from the shared one), and the node's new cameras publish to it. A node installed
-  without one publishes to the core's.
+- **A node's MediaMTX** keeps its cameras' live video on the node: the core registers it when the
+  node joins (Administration → MediaMTX, pinned to `vms-hall`, with the shared accounts), and the
+  node's cameras publish to it. A node installed without one publishes to the core's.
 - **A node's cameras record to a storage on that node.** None is assigned to them by default: add
   one in the web interface with a path on the node's own disk
   (`C:\ProgramData\TreeAlarm\VMS\media_storage` on Windows, `/data/media_storage` on a Linux node)
@@ -94,7 +106,9 @@ role takes an uninstall first. An upgrade keeps the role.
   one for an app id only against a token for it, signed with the core's key; a node's package holds
   tokens for its own app ids only.
 - **The package is a credential**: the node's tokens, the core's database, broker, MediaMTX and
-  Keycloak passwords, the live-video session key, and Consul's key. Move it as you would a password, and delete it once installed.
+  Keycloak passwords and addresses, the live-video session key, and Consul's key. It crosses the
+  network from the core's web in plain HTTP; a file made there should be moved as you would move a
+  password.
 - **The address must stay put**: the sidecars register at it and Consul binds to it. Give the core
   and the nodes static addresses, and keep their clocks right (certificates allow 15 minutes).
 - **Firewall**, made by the installer for the role: everywhere the web, and where MediaMTX runs its
@@ -108,9 +122,10 @@ role takes an uninstall first. An upgrade keeps the role.
 - **Not yet across machines**: analytics workers (there are none on Windows anyway) and the Square
   integration.
 
-`TaVmsHost core <address>`, `package <node>` and `join <package> <address>` are what the installer
-runs; they keep their files in `C:\ProgramData\TreeAlarm\VMS\distributed` (keys readable by
-administrators only), laid out as `data/distributed` is on Linux.
+`TaVmsHost core <address>` and `join (<package> | --core <core> --name <node>) <address>` are what
+the installer runs; they keep their files in `C:\ProgramData\TreeAlarm\VMS\distributed` (the
+root's key readable by administrators only; the key that signs tokens by the services too, since
+VmsCfg signs the tokens of the nodes that join), laid out as `data/distributed` is on Linux.
 
 ## What runs
 

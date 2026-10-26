@@ -13,9 +13,9 @@ namespace TaVmsHost;
 //
 // Sentry signs a certificate for an app id only against a token for it (its jwks validator): a JWT
 // whose subject is the app's SPIFFE id and whose audience is Sentry's, signed with a key of the
-// JWKS in Sentry's configuration. Here that key is ES256; on a Linux core it is Ed25519. Only the
-// core's own Sentry ever checks them, so the two need not agree. No "exp": a token is a machine's
-// credential, and what revokes it is a new key in the JWKS.
+// JWKS in Sentry's configuration: ES256, as on a Linux core and as the core's VmsCfg signs the
+// tokens of nodes that join later, with the same key (core\jwt.key). No "exp": a token is a
+// machine's credential, and what revokes it is a new key in the JWKS.
 internal static class Pki
 {
   public const string SentryId = "spiffe://localhost/ns/default/dapr-sentry";

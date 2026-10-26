@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  BAFunctions.dll, the setup wizard's Role page code (BAFunctions.cpp). Built before Bundle.wixproj,
+  BAFunctions.dll, the setup wizard's Role page code (bafunctions.cpp). Built before Bundle.wixproj,
   with Visual Studio's MSBuild rather than dotnet (which cannot build C++):
 
     msbuild BAFunctions.vcxproj -restore -p:Configuration=Release -p:Platform=x64
@@ -47,13 +47,13 @@
     </ClCompile>
     <Link>
       <ModuleDefinitionFile>BAFunctions.def</ModuleDefinitionFile>
-      <AdditionalDependencies>comctl32.lib;gdiplus.lib;msimg32.lib;shlwapi.lib;wininet.lib;iphlpapi.lib;ws2_32.lib;comdlg32.lib;msi.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;gdiplus.lib;msimg32.lib;shlwapi.lib;wininet.lib;iphlpapi.lib;winhttp.lib;ws2_32.lib;msi.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="BAFunctions.cpp" />
+    <ClCompile Include="bafunctions.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="BAFunctions.def" />
