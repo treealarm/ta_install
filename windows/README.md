@@ -70,9 +70,9 @@ ta_vms-setup-x64.exe /quiet /norestart /log setup.log Role=node Address=192.168.
 ```
 
 The MSI takes the same as `TAVMSROLE`, `TAVMSADDRESS`, `NODEPACKAGE` and `NODEMEDIAMTX`. A standalone installation
-can become the core by installing over it with `Role=core`; its MediaMTX server in VmsCfg still
-names `127.0.0.1` then, and its host has to be set to the core's address in the web interface. Any
-other change of role takes an uninstall first. An upgrade keeps the role.
+can become the core by installing over it with `Role=core`; its MediaMTX server, which named
+`127.0.0.1`, then names the core's address (VmsCfg moves it when it starts). Any other change of
+role takes an uninstall first. An upgrade keeps the role.
 
 - **A node's services carry its name**: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`,
   `vmsonvif-actors-hall`, `vmslogger-hall`, `web-vms-hall`. Its cameras are added with server

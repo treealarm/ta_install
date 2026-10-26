@@ -77,9 +77,9 @@ internal static class Distributed
       // Keycloak listens on this address (services.json), where every machine's web logs users in.
       ("KEYCLOAK_URL", KeycloakUrl(ip, config.Require("KEYCLOAK_PORT"))),
     ]);
+    // A MediaMTX row a standalone installation seeded at 127.0.0.1 is moved to VMS_MTX_HOST by
+    // VmsCfg itself, on its next start.
     output.WriteLine($"This machine is the core at {ip}: {dir}");
-    output.WriteLine("If it ran as a standalone installation before, the MediaMTX server VmsCfg created then still");
-    output.WriteLine($"names 127.0.0.1: set its host to {ip} in the web interface (Administration, MediaMTX).");
   }
 
   public static string Package(StackConfig config, string name, TextWriter output)

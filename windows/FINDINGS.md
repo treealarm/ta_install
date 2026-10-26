@@ -3,6 +3,34 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-26, night: v0.1.7 as a core here, a Linux node, a camera on each
+
+The released setup.exe of v0.1.7, `/quiet Role=core Address=192.168.1.100`, over the standalone
+installation the wizard had just upgraded: **264 s**, exit 0, its data kept. `TaVmsHost package
+asus` (2 285 bytes); the Linux machine next to it joined with `distributed.sh join` and `up`
+(`treealarm/*:latest` of ta_vms 384fee1). Both in Consul at once, all 18 services passing — 11 on
+the core, 7 on the node.
+
+- Through the core's web: the core's MediaMTX row pointed at 192.168.1.100 by hand (it still said
+  127.0.0.1 after `Role=core`, as on 2026-10-23; fixed afterwards: VmsCfg now moves a loopback row to
+  `VMS_MTX_HOST` when that is an IP address — tried here with the row set back to 127.0.0.1 and that
+  VmsCfg.dll swapped in, the row named 192.168.1.100 after the restart and the node's row was left
+  alone) with `transcode_hevc` on; the node's MediaMTX added (host
+  192.168.1.45, node `vms-asus`); a storage on the node's disk (`/data/media_storage`).
+- Two cameras over ONVIF, each through its own node's `vmsonvif`: a Wi-Fi camera on the LAN
+  (192.168.1.150, H.265 2560×1440) on the core's node, OnvifSim's master on the Linux node. VmsCfg
+  gave each its own node's MediaMTX.
+- **Both webs show both cameras**, and live video of each plays through either — headless Chrome
+  for 30 s per web: the Wi-Fi camera at 2560×1440, 11–12 fps (transcoded on the core: `decoding on
+  d3d11va, encoding on h264_nvenc`), the simulator at 640×360, 10 fps, no loss on any. Checked by
+  the user in a browser too.
+- Continuous recording on each node's own disk; the clips of both cameras are listed by either web
+  and the oldest of each plays through either over HLS (first fragment whole, `moof`).
+- The real camera 192.168.2.64 could not take part: the Linux machine's link to that network was
+  down.
+
+Afterwards the node and OnvifSim were stopped; the core stays installed here, with the two cameras.
+
 ## 2026-10-26, evening: the same upgrade through the wizard
 
 The same candidate (ta_install 627e159) over a fresh v0.1.6 on 192.168.1.100, this time through the
