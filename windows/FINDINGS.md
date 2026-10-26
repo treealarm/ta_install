@@ -3,6 +3,23 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-26, evening: the same upgrade through the wizard
+
+The same candidate (ta_install 627e159) over a fresh v0.1.6 on 192.168.1.100, this time through the
+wizard: started in the console user's session, elevated, and driven by UI Automation as on
+2026-10-23, one HEVC camera recording.
+
+- One page: the licence, Install and Cancel. No Options page and no role page on an upgrade, and
+  **no "Files In Use"**. Install to the final page took **4 min 39 s**.
+- After it: version 0.1.7, 26 processes running, no restarts; clips 2 → 3, recording went on.
+- **Open did not open the browser.** The button was pressed, the wizard closed itself 6 s later as
+  it does after a launch, and the bundle's log has no `Failed to launch target`. Nothing came up
+  on the screen (the user watched it). The same launch done by hand right after — `explorer.exe`
+  with the `.url` the wizard uses, in the same session — opened Chrome both elevated and not.
+  On 2026-10-23 the same button through Explorer worked twice. Not found; it does not block a
+  release (the Start menu and desktop shortcuts open the same page) and is to be looked at the next
+  time the wizard runs.
+
 ## 2026-10-26, afternoon: upgrading the v0.1.6 release to main, on both machines
 
 The candidate for v0.1.7: the installer of ta_install 627e159 (CI run 40312591238, ta_vms 384fee1),
