@@ -196,7 +196,7 @@ function Initialize-Role {
     Invoke-Checked $hostExe ($join + @('--data', $DataDir))
     if ($NodePackage) {
       Remove-Item -LiteralPath $NodePackage -Force -ErrorAction SilentlyContinue
-      Write-Step "deleted $NodePackage: the node has joined, and it held the core's passwords"
+      Write-Step "deleted ${NodePackage}: the node has joined, and it held the core's passwords"
     }
   }
 }
