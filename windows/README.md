@@ -7,8 +7,10 @@ processes, on one machine. Download it from the
 build as an artifact, and publishes it to a release on a `vX.Y.Z` tag.
 
 **Not in the Windows version:** `roitrc` (ROI re-compression of clips) and the analytics worker —
-neither builds for Windows — and the Square integration. Live HEVC is re-encoded for WebRTC on the
-CPU: there is no hardware encoder for Windows yet.
+neither builds for Windows — and the Square integration. Live HEVC is re-encoded to H.264 for
+WebRTC on an NVIDIA card's encoder when the machine has one (driver 570 or later; a GeForce takes
+eight streams, and the rest go to the CPU), and on the CPU otherwise: there is no hardware encoder
+for Intel or AMD graphics on Windows yet.
 
 **Login** goes through a Keycloak that the installer ships with its Java runtime, on the loopback
 (`127.0.0.1:5160`). The first sign-in is `admin` / `admin`; nothing makes anyone change a

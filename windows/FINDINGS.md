@@ -3,6 +3,38 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-26: NVENC on a Direct3D 11 device, decoding on D3D11VA
+
+A fresh standalone install of v0.1.7 (ta_install bf937ed, 168 s), with only `vms` replaced by CI
+builds of ta_vms' `d3d11` branch (roi_transcode `d3d11`: `DecodeEngine::D3d11va`, and NVENC on a
+D3D11 device on the NVIDIA adapter, chosen by vendor id, instead of CUDA). The same source as
+2026-10-22: 1080p25 HEVC at 4 Mbit/s (`testsrc2`, libx265) published from the LAN, `transcode_hevc`
+on, viewers in headless Chrome on another machine, CPU over 60 s. The console user had Roblox
+open; the machine was at 3–8 % before each run.
+
+| | vms | NVENC enc / dec | sessions | what the viewers got |
+|---|---|---|---|---|
+| v0.1.7 as released (CUDA), one stream | 4.9 % of a core | 5 % / 4 % | 1 | 25 fps, 3.9 Mbit/s, no loss, jitter buffer 57–67 ms |
+| D3D11, one stream | 5.1 % | 4 % / 4 % | 1 | 25 fps, 3.9 Mbit/s, no loss, jitter buffer 12–14 ms |
+| D3D11, four streams | 18.6 % | 18 % / 15 % | 4 | 25 fps each, 3.9 Mbit/s, no loss, 15–19 ms |
+
+- vms logs `decoding on d3d11va, encoding on 'h264_nvenc (NVIDIA NVENC, no regions)'`, and
+  `[D3D11VA] Using device 10de:1c82 (NVIDIA GeForce GTX 1050 Ti)`. `nvcuvid.dll` (CUDA's decoder)
+  is not loaded any more; `nvcuda.dll` still is — NVENC's own runtime loads it.
+- The cost is the same as on CUDA: the gain is that the decode in front of NVENC is the one every
+  Windows GPU has, which a QSV or AMF encoder can share. The jitter buffer difference was steady
+  over the runs but was not looked into.
+- **Fixed on the way: NVENC never opened on D3D11.** The first build preallocated its upload pool
+  as one texture array of 20, and D3D11 answered `Could not create the texture (80070057)`
+  (E_INVALIDARG): every stream went to libx264 at 120 % of a core. A stock FFmpeg 8.1 on the same
+  machine (left in `tavms-test\ffdiag`) showed why: an NV12 array of more than two textures with
+  no bind flags is refused, and the device option `RTV` that would bind them reaches the decoder's
+  textures as well, after which NVENC refuses to open — while D3D11VA decode into NVENC on a plain
+  device works, with 32 extra decoder surfaces too. The upload pool now starts empty and makes
+  single textures (roi_transcode 56d5174).
+- The upload pool itself, checked with HEVC 4:4:4, which Pascal cannot decode: `decoding on the
+  CPU`, encoding on NVENC, 25 fps to the viewer. vms at 72 % of a core, the software decode.
+
 ## 2026-10-25, evening: a web on every machine, a MediaMTX on the node
 
 The installer of ta_install ab43dd8 (CI run 40217110528, every job green; ta_vms 8c981d9), on the
