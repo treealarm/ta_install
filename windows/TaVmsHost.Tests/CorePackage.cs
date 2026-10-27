@@ -20,7 +20,10 @@ internal static partial class CorePackage
   // to give a node exactly these, or one of its sidecars gets no certificate.
   public static readonly string[] AppIdPrefixes = ["vms", "vmsfs", "vmsonvif", "vmsonvif-actors", "vmslogger", "web-vms"];
 
-  public static string Make(StackConfig core, string name, string toDir, IReadOnlyDictionary<string, string>? services = null)
+  public const string DefaultNodeAddress = "192.168.1.20";
+
+  public static string Make(StackConfig core, string name, string toDir, IReadOnlyDictionary<string, string>? services = null,
+    string address = DefaultNodeAddress)
   {
     var dir = core.DistributedDir;
     var key = File.ReadAllText(Path.Combine(dir, "core", "jwt.key"));
@@ -43,6 +46,13 @@ internal static partial class CorePackage
         .Select(kv => $"{kv.Key}={EnvFile.Quote(kv.Key, kv.Value)}\n")),
       ["name"] = name + "\n",
     };
+    // The node's certificate for its address, from the core's TLS authority, as VmsCfg issues it.
+    var ca = new Pki.TlsAuthority(File.ReadAllText(Path.Combine(dir, "tls", "ca.crt")),
+      File.ReadAllText(Path.Combine(dir, "core", "tls-ca.key")));
+    var (serverCert, serverKey) = Pki.IssueServerCertificate(ca, address, DateTimeOffset.UtcNow);
+    files["tls/ca.crt"] = ca.CertPem;
+    files["tls/server.crt"] = serverCert;
+    files["tls/server.key"] = serverKey;
     foreach (var prefix in AppIdPrefixes)
       files[$"tokens/{prefix}-{name}.token"] = Pki.Token(key, Pki.AppSpiffeId($"{prefix}-{name}"), DateTimeOffset.UtcNow);
 

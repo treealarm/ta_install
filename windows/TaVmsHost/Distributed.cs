@@ -25,7 +25,8 @@ namespace TaVmsHost;
 //
 //   core\           root.key: the root's key, closed to the service account; jwt.key, which signs
 //                   the tokens, readable by it, since VmsCfg signs the tokens of nodes that join;
-//                   tls-ca.key, the key of the deployment's TLS certificate authority
+//                   tls-ca.key, the key of the deployment's TLS certificate authority, readable by
+//                   it too, since VmsCfg issues the certificates of nodes that join
 //   tls\            ca.crt, that authority; server.crt (followed by ca.crt) and server.key, the
 //                   certificate this machine presents on the LAN (core)
 //   sentry\         ca.crt, issuer.crt, issuer.key, config.yaml: what Sentry runs on (core)
@@ -126,6 +127,8 @@ internal static class Distributed
     {
       ca = Pki.CreateTlsAuthority(address, now);
       WriteText(caKeyPath, ca.KeyPem);
+      // VmsCfg, which runs as the service account, issues the certificates of the nodes that join.
+      DirectoryAcl.AllowServiceRead(caKeyPath);
       WriteText(caCertPath, ca.CertPem);
     }
 

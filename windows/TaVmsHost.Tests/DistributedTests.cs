@@ -22,7 +22,7 @@ public sealed class DistributedTests : IDisposable
     // letters and digits (Install-TaVms.ps1, New-Secret).
     _core.AppendSite("POSTGRES_PASSWORD=core-pg-pass");
     Distributed.Core(_core.Load(), CoreAddress, TextWriter.Null);
-    var package = CorePackage.Make(_core.Load(), "hall", _core.Data);
+    var package = CorePackage.Make(_core.Load(), "hall", _core.Data, address: NodeAddress);
     // A node's site.env is the installer's header and storage paths only: its passwords are the core's.
     File.WriteAllLines(_node.SiteEnv, ["# site.env of a node"]);
     Distributed.Join(_node.Load(), package, NodeAddress, mediaMtx: true, TextWriter.Null);
@@ -113,6 +113,19 @@ public sealed class DistributedTests : IDisposable
     Assert.Contains($"-bind={NodeAddress}", agent.Args);
     // The core's key, which came in the package.
     AssertConsulKey(config, agent, _core.Load().Env["CONSUL_ENCRYPT"]);
+  }
+
+  [Fact]
+  public void A_node_keeps_the_certificate_for_its_address_that_came_in_its_package()
+  {
+    var dir = _node.Load().DistributedDir;
+    using var leaf = X509Certificate2.CreateFromPem(
+      File.ReadAllText(Path.Combine(dir, "tls", "server.crt")), File.ReadAllText(Path.Combine(dir, "tls", "server.key")));
+    Assert.Equal([System.Net.IPAddress.Parse(NodeAddress)],
+      leaf.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateIPAddresses());
+    Assert.Equal(Distributed.Fingerprint(_core.Load()), Distributed.Fingerprint(_node.Load()));
+    // The node never holds the authority's key.
+    Assert.False(File.Exists(Path.Combine(dir, "core", "tls-ca.key")));
   }
 
   [Fact]

@@ -13,10 +13,14 @@ namespace TaVmsHost;
 //                        each of those services is
 //   name                 the node's name
 //   tokens/<app>.token   a Sentry token for each of the node's app ids, and for nothing else
+//   tls/ca.crt           the core's TLS certificate authority
+//   tls/server.crt       the node's certificate for its address, followed by the authority, and
+//   tls/server.key       its key: what the node presents on the LAN (none in a package from a
+//                        core made before it had an authority)
 //   nodes                in a package from before VmsCfg made them: a list of pairs, not read
 internal static partial class NodePackage
 {
-  [GeneratedRegex(@"^(shared\.env|nodes|core\.env|name|tokens/[a-z0-9][a-z0-9-]*\.token)$")]
+  [GeneratedRegex(@"^(shared\.env|nodes|core\.env|name|tokens/[a-z0-9][a-z0-9-]*\.token|tls/(ca\.crt|server\.crt|server\.key))$")]
   private static partial Regex EntryName();
 
   // Required in core.env: a node cannot reach the core's services without them, and its web logs
