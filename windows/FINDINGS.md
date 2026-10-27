@@ -3,6 +3,49 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-27, evening: the v0.1.8 candidate on the Ivy Bridge, then as the core of a Linux node
+
+192.168.1.82 (i5-3450, HD 2500, Wi-Fi): v0.1.7 installed fresh (151 s), a 1080p25 HEVC camera
+recording on it for 50 minutes (50 clips, 1.4 GB), `transcode_hevc` on, one viewer. Then the
+candidate (ta_vms 3cfb114, ta_install 2af342e) through the wizard, driven by UI Automation in
+olga's console session.
+
+- One page, the licence and Install; no "Files In Use". About **4 minutes** to the last page.
+  26 processes up, the clips of 0.1.7 all there and recording on, live 1080p25 without loss.
+- **QSV declines on an Ivy Bridge**, as it should: `no QSV runtime on the Intel d3d11va device`,
+  and the stream goes to `video_transcode_processor` (libx264) at 88 % of a core, as on 0.1.7
+  (89 %). Nothing to do for it (ta_vms `docs/future_plans/windows-hardware-encoders.md`).
+- **Open opened Documents** instead of the browser. `InstallFolder` comes from the registry with a
+  trailing `\`, so the argument the wizard hands Explorer was `"C:\Program Files\TreeAlarm
+  VMS\\TreeAlarm VMS.url"`, and Explorer cannot parse a doubled `\`: it opens the user's
+  Documents. A fresh install takes the bundle's default, which has none; the 2026-10-26 failure
+  was an upgrade. BAFunctions now strips the `\` (`OnDetectComplete`); with the
+  next installer (ta_install dc08d73, ta_vms 3cb1086) Open started the browser on
+  `http://localhost:5134/`, after an upgrade through the wizard.
+- **`Role=core` over the same version did nothing**: exit 0 within a second. Burn plans nothing for
+  a bundle already installed, so the README's way of making a standalone the core never reached
+  `Install-TaVms.ps1`. `/repair` did run it, but without stopping the stack first (the custom
+  action's condition knew only upgrades), and ended in 3010. Now BAFunctions asks for a repair of
+  the MSI whenever `Role` is given and the package is present (`OnPlanPackageBegin`), and the stop
+  runs on `REINSTALL` too.
+  With dc08d73, `/quiet Role=core Address=192.168.1.82` over that same core: `bafunctions requested:
+  Repair`, the stack stopped and started again, **exit 0 after 200 s, `restart: None`**, the
+  fingerprint printed again and unchanged, recording on.
+- As the core (by that `/repair`): TLS authority and certificate made, the fingerprint printed,
+  `LOCAL SERVICE` given read access to `tls-ca.key`, all kept by the next upgrade. **The MediaMTX
+  row moved from 127.0.0.1 to 192.168.1.82 by itself**, the first time on hardware.
+- A Linux node here (`lnx`, 192.168.1.45) joined over the core's web while enrollment was open;
+  OnvifSim on the node and the HEVC camera on the core, each plays through both webs without loss.
+  Joined again with the next installer's core: the package brought `tls/server.crt` for
+  192.168.1.45, issued by the core's CA (the same fingerprint `TaVmsHost fingerprint` prints there).
+- After 44 minutes as the core, the 15-minute renewal of streaming subscriptions left one consumer
+  per RabbitMQ queue and the connection count where it started (18), and `vmsonvif`'s sidecar had
+  used 1.2 s of CPU.
+
+**Downloading the artifact on this machine was the slow part**: GitHub served it to the Wi-Fi box
+at about 0.3 MB/s per connection, 35 minutes for 1 GB. Fetched on the Linux machine in 32 ranges in
+parallel (curl `-r`, about 5 minutes) and passed over the LAN in one to three minutes.
+
 ## 2026-10-27: QSV on an Intel iGPU, and a developer's laptop as the host
 
 A fresh standalone install from CI run 40475634878 (ta_install 229935a, ta_vms d596529) on an
