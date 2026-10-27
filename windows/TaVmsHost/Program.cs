@@ -61,12 +61,16 @@ switch (positional)
     return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: true, Console.Out));
   case ["join", var package, var address, "--no-mediamtx"]:
     return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: false, Console.Out));
+  case ["tls"]:
+    return RunDistributed(home, data, c => Distributed.EnsureCoreTls(c, Console.Out));
+  case ["fingerprint"]:
+    return RunDistributed(home, data, c => Console.WriteLine(Distributed.Fingerprint(c)));
   case ["send-ctrl-c", var pid] when OperatingSystem.IsWindows():
     // Internal: see Native.SendCtrlC.
     Native.SendCtrlC(int.Parse(pid, System.Globalization.CultureInfo.InvariantCulture));
     return 0;
   default:
-    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | join (<package> | --core <core[:port]> --name <node>) <address> [--no-mediamtx]   [--data <dir>]");
+    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | join (<package> | --core <core[:port]> --name <node>) <address> [--no-mediamtx] | tls | fingerprint   [--data <dir>]");
     return 2;
 }
 

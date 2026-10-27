@@ -1,3 +1,5 @@
+using System.Formats.Asn1;
+using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -56,6 +58,101 @@ internal static class Pki
     request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
     request.CertificateExtensions.Add(new X509KeyUsageExtension(usage, true));
     request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+  }
+
+  // The deployment's own TLS, for what crosses the LAN in the clear otherwise: a CA of the core, and
+  // under it a certificate for a machine's address — as scripts/distributed.sh makes them (make_tls_ca,
+  // issue_server_cert), keys in PKCS#8. Not the root above: that one signs Sentry's online issuer,
+  // carries no constraints, and has no place in the machines' trust stores, where this one goes. The
+  // core's VmsCfg holds this CA's key to issue the certificates of the nodes that join, so the CA
+  // vouches for private addresses only (RFC 1918, and 100.64/10 of CGNAT and VPN overlays) and for no
+  // DNS name at all: tavms.invalid is the one name it permits, and it never resolves.
+  public static readonly TimeSpan TlsServerLifetime = TimeSpan.FromDays(825); // what Apple's platforms accept
+  public static readonly TimeSpan TlsRenewBefore = TimeSpan.FromDays(60);
+
+  private static readonly (byte[] Address, byte[] Mask)[] PermittedNetworks =
+  [
+    ([10, 0, 0, 0], [255, 0, 0, 0]),
+    ([172, 16, 0, 0], [255, 240, 0, 0]),
+    ([192, 168, 0, 0], [255, 255, 0, 0]),
+    ([100, 64, 0, 0], [255, 192, 0, 0]),
+  ];
+  private const string PermittedDnsName = "tavms.invalid";
+
+  public sealed record TlsAuthority(string CertPem, string KeyPem);
+
+  public static TlsAuthority CreateTlsAuthority(string coreAddress, DateTimeOffset now)
+  {
+    using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    var request = new CertificateRequest($"CN=TreeAlarm VMS CA {coreAddress}", key, HashAlgorithmName.SHA256);
+    request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+    request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+    request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+    request.CertificateExtensions.Add(NameConstraints());
+    using var ca = request.CreateSelfSigned(now.AddMinutes(-5), now + Lifetime);
+    return new TlsAuthority(ca.ExportCertificatePem() + "\n", key.ExportPkcs8PrivateKeyPem() + "\n");
+  }
+
+  // RFC 5280 4.2.1.10: permittedSubtrees [0] of GeneralSubtree { base GeneralName }, with
+  // iPAddress [7] as address and mask, dNSName [2] as IA5String; both implicitly tagged.
+  private static X509Extension NameConstraints()
+  {
+    var writer = new AsnWriter(AsnEncodingRules.DER);
+    using (writer.PushSequence())
+    using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0)))
+    {
+      foreach (var (address, mask) in PermittedNetworks)
+        using (writer.PushSequence())
+          writer.WriteOctetString([.. address, .. mask], new Asn1Tag(TagClass.ContextSpecific, 7));
+      using (writer.PushSequence())
+        writer.WriteCharacterString(UniversalTagNumber.IA5String, PermittedDnsName, new Asn1Tag(TagClass.ContextSpecific, 2));
+    }
+    return new X509Extension("2.5.29.30", writer.Encode(), critical: true);
+  }
+
+  /// <summary>
+  /// A certificate for one machine's address, with the CA after it in the PEM: a machine joining sees
+  /// the CA in the handshake and checks it against the fingerprint it was given. Its CN is not the
+  /// bare address on purpose: OpenSSL reads a CN that looks like a host name against the CA's DNS
+  /// constraint, and would refuse it.
+  /// </summary>
+  public static (string CertPem, string KeyPem) IssueServerCertificate(TlsAuthority ca, string address, DateTimeOffset now)
+  {
+    using var caCert = X509Certificate2.CreateFromPem(ca.CertPem, ca.KeyPem);
+    using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    var request = new CertificateRequest($"CN=TreeAlarm VMS {address}", key, HashAlgorithmName.SHA256);
+    request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+    request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+    request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
+    var san = new SubjectAlternativeNameBuilder();
+    san.AddIpAddress(IPAddress.Parse(address));
+    request.CertificateExtensions.Add(san.Build());
+    request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(caCert, true, false));
+    var serial = RandomNumberGenerator.GetBytes(16);
+    serial[0] &= 0x7F;
+    // Within the authority's own validity, which .NET insists on: an authority openssl made starts
+    // the moment it was made, not five minutes before; and one in its last 825 days ends sooner.
+    var notBefore = Max(now.AddMinutes(-5), caCert.NotBefore.ToUniversalTime());
+    var notAfter = Min(now + TlsServerLifetime, caCert.NotAfter.ToUniversalTime());
+    using var leaf = request.Create(caCert, notBefore, notAfter, serial);
+    return (leaf.ExportCertificatePem() + "\n" + ca.CertPem, key.ExportPkcs8PrivateKeyPem() + "\n");
+  }
+
+  private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
+  private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+
+  /// <summary>Whether the first certificate in the PEM ends within <see cref="TlsRenewBefore"/>.</summary>
+  public static bool NeedsRenewal(string certPem, DateTimeOffset now)
+  {
+    using var cert = X509Certificate2.CreateFromPem(certPem);
+    return cert.NotAfter.ToUniversalTime() - now.UtcDateTime < TlsRenewBefore;
+  }
+
+  /// <summary>SHA-256 of the certificate, in hex pairs, as browsers and openssl show it.</summary>
+  public static string Fingerprint(string certPem)
+  {
+    using var cert = X509Certificate2.CreateFromPem(certPem);
+    return string.Join(':', SHA256.HashData(cert.RawData).Select(b => b.ToString("X2")));
   }
 
   public static string CreateSigningKeyPem()
