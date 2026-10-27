@@ -411,6 +411,25 @@ public:
     return __super::OnDetectComplete(hrStatus, fEligibleForCleanup);
   }
 
+  // Role= given over the same version already installed — a standalone installation asked to become
+  // the core: Burn sees the package present, plans nothing and exits 0, so Install-TaVms.ps1 never
+  // runs and the machine silently stays what it was. Repairing the package runs it, with the role.
+  // An upgrade runs it anyway, and without Role= nothing is asked of it.
+  STDMETHODIMP OnPlanPackageBegin(LPCWSTR wzPackageId, BOOTSTRAPPER_PACKAGE_STATE state, BOOL fCached,
+    BOOTSTRAPPER_PACKAGE_CONDITION_RESULT installCondition, BOOTSTRAPPER_PACKAGE_CONDITION_RESULT repairCondition,
+    BOOTSTRAPPER_REQUEST_STATE recommendedState, BOOTSTRAPPER_CACHE_TYPE recommendedCacheType,
+    BOOTSTRAPPER_REQUEST_STATE* pRequestedState, BOOTSTRAPPER_CACHE_TYPE* pRequestedCacheType, BOOL* pfCancel) override
+  {
+    if (IsNamed(wzPackageId, L"TaVms") && state == BOOTSTRAPPER_PACKAGE_STATE_PRESENT
+      && *pRequestedState == BOOTSTRAPPER_REQUEST_STATE_PRESENT && !GetVariable(L"Role").empty())
+    {
+      BalLog(BOOTSTRAPPER_LOG_LEVEL_STANDARD, "Role given over the same version: repairing TaVms to apply it");
+      *pRequestedState = BOOTSTRAPPER_REQUEST_STATE_REPAIR;
+    }
+    return __super::OnPlanPackageBegin(wzPackageId, state, fCached, installCondition, repairCondition,
+      recommendedState, recommendedCacheType, pRequestedState, pRequestedCacheType, pfCancel);
+  }
+
   STDMETHODIMP OnThemeControlLoaded(LPCWSTR wzName, WORD wId, HWND hWnd, BOOL* pfProcessed) override
   {
     if (IsNamed(wzName, AddressListControl))

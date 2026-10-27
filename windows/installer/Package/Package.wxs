@@ -137,7 +137,9 @@
       ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Stop-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot;" />
     <!-- An upgrade stops the running stack once more, before InstallValidate: that action asks who
          holds the files it will replace, and with the stack up the wizard showed "Files In Use" for
-         Keycloak's java (Retry / Ignore / Exit) on every upgrade. Immediate, so before the
+         Keycloak's java (Retry / Ignore / Exit) on every upgrade. So does a repair, which is what
+         Role= over the same version is (BAFunctions): without it vms's DLLs were held, and the repair
+         ended asking for a reboot (3010). Immediate, so before the
          transaction: a cancel between here and InstallInitialize leaves the stack stopped until the
          next boot, when the services start by themselves. It runs with the installing user's rights,
          elevated under the bundle. Inline, a short form of Stop-TaVms.ps1, which is not on disk yet
@@ -161,7 +163,7 @@
       ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]setup\Uninstall-TaVms.ps1&quot; -InstallDir &quot;[INSTALLFOLDER].&quot; -DataDir &quot;[DATADIR]&quot;" />
 
     <InstallExecuteSequence>
-      <Custom Action="TaVmsStopBeforeValidate" Before="InstallValidate" Condition="(WIX_UPGRADE_DETECTED OR INNOINSTALLLOCATION) AND NOT REMOVE" />
+      <Custom Action="TaVmsStopBeforeValidate" Before="InstallValidate" Condition="(WIX_UPGRADE_DETECTED OR INNOINSTALLLOCATION OR REINSTALL) AND NOT REMOVE" />
       <Custom Action="TaVmsRemoveInno" After="InstallInitialize" Condition="INNOINSTALLLOCATION AND NOT REMOVE" />
       <Custom Action="TaVmsStop" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND UPGRADINGPRODUCTCODE" />
       <Custom Action="TaVmsRemove" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
