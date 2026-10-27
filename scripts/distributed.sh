@@ -295,7 +295,7 @@ cmd_join() {
   [[ ! -e "$DIST" ]] || die "$DIST exists: this machine is part of a deployment already"
   umask 077
   if [[ -n $core ]]; then
-    package=$(mktemp); trap 'rm -f "$package"' EXIT
+    package=$(mktemp); trap "rm -f -- '$package'" EXIT
     fetch_package "$package" "$core" "$name" "$address" "$mediamtx"
   fi
   mkdir -p "$DIST/tokens"
