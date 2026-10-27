@@ -3,6 +3,69 @@
 What the installer did on real hardware, as opposed to the CI runner. Each entry says what was
 checked, what happened, why, and what was done about it. Newest run first.
 
+## 2026-10-27: QSV on an Intel iGPU, and a developer's laptop as the host
+
+A fresh standalone install from CI run 40475634878 (ta_install 229935a, ta_vms d596529) on an
+i7-12700 laptop with UHD 770 and no other GPU: Windows 11 26200, Intel graphics driver 30.0.101.1371
+of February 2022, not updated. No `VMS_VIDEO_ENCODER`. Source: 1080p25 HEVC from `testsrc`
+(libx265 ultrafast, GOP 50) published into the installation's own MediaMTX, `transcode_hevc` on,
+one viewer in headless Chrome on the same machine, CPU over 30 s.
+
+| | vms | what it logs |
+|---|---|---|
+| default order, HEVC Main 4:2:0 | 9.5 % of a core, GPU video engine 4 % | `decoding on d3d11va, encoding on 'h264_qsv (Intel VPL mfxExtEncoderROI)'` |
+| default order, HEVC RExt 4:4:4 (RGB) | 35 % | `decoding on the CPU, encoding on 'h264_qsv ...'` |
+| `VMS_VIDEO_ENCODER=cpu` (`video_transcode_processor`) | 74 % | `no hardware backend requested, leaving this stream to the CPU path` |
+
+- The order is `vaapi -> nvenc -> qsv`, and `backend: qsv ... opened; 2 declined before it`:
+  VA-API is not in the Windows FFmpeg, and `Failed to find d3d11va adapter by vendor id 0x10de`
+  is NVENC declining. So a 2022 driver is enough for the whole path, decode included.
+- The 4:4:4 row is the test source, not vms: `testsrc` is RGB, and without `-pix_fmt yuv420p`
+  libx265 encodes it as `gbrp`, profile RExt, which D3D11VA declines. Cameras send 4:2:0. Any
+  test command for HEVC transcoding needs `-pix_fmt yuv420p`.
+- Out of MediaMTX: 25.0 fps, a keyframe every 2 s, 500 packets in 20 s. The viewer showed clean
+  frames (no green); headless Chrome itself dropped 3–11 % of them while rendering in software.
+- On demand as designed: with nobody watching the transcode stopped after 30 s
+  (`stopped WebRTC ... (idle)`), and opening the page started it again within 2 s. A source that
+  dropped and came back was picked up again, and the viewer resumed, without anyone touching it.
+- ta_vms' `windows-build` of 13ba0ce dropped into the same install: the stream URL's password is
+  `***` in the log now (`RTSP connected [cam=...]: rtsp://vms_read:***@...`), same QSV path.
+
+**The install failed the first time, behind a VPN.** `rabbitmqctl await_startup` timed out:
+`unable to connect to epmd (port 4369) on ASUS-TUF: timeout`. RabbitMQ itself was up. The machine
+name resolved first to a ZeroTier address, and while the VPN (AmneziaVPN, WireGuard, full tunnel)
+was up, no address of the machine's own but the tunnel's was reachable from the machine itself.
+Excluding those subnets from the tunnel let the next install through (exit 0, 26 processes up, no
+restarts). A hosts entry does not help: Windows answers its own name from its adapters. The CLI
+finds the node by the machine's name (`Install-TaVms.ps1`, the comment above the listeners), so
+anything that makes the first address of that name unreachable fails the install. Not fixed.
+A node name on the loopback (`RABBITMQ_NODENAME`, for the service and every `rabbitmqctl` call)
+would take the machine's name out of it.
+
+**A second RabbitMQ on the machine.** The developer's own RabbitMQ (`C:\Program Files\Erlang OTP`,
+service `RabbitMQ`, automatic) uses the node name `rabbit@ASUS-TUF` too. After a reboot both start
+and one dies: `RabbitMQ: Erlang machine stopped instantly (distribution name conflict?)`. Ours
+happened to win. A node name of our own (`tavms@localhost`) would avoid this and the VPN case both.
+
+**Port 8554 shared with another product, silently.** Elvees Orwell 2k's `onvifserver` (automatic)
+listens on `0.0.0.0:8554`. With it stopped the install was fine; after a reboot both were up,
+MediaMTX on `[::]:8554` and onvifserver on `0.0.0.0:8554`, and Windows allows that pair without an
+error. A connection to `127.0.0.1:8554` — every publish from vms — reaches the more specific IPv4
+socket, onvifserver. Nothing in the log says so. The installer could look for a listener on
+`RTSP_PORT` before it starts MediaMTX, and say whose it is.
+
+**Signed out by every restart of the service.** After `Restart-Service TaVmsHost` the open tab
+landed on the login page: web_srv answered 11 s after the restart and Keycloak 7 s later, the
+first API call got 401, the refresh got 401 as well — web_srv's `/api/auth/refresh` answered
+every failure that way, Keycloak not listening included — and the browser took that as a refused
+token. Restarting web-vms or keycloak alone did not do it. Fixed in ta_vms (not yet in an
+installer): the refresh answers 503 unless Keycloak refused the token, and the browser keeps the
+session on a refresh nobody answered.
+
+The laptop switched itself off once during the run (Kernel-Power 41, bugcheck 0, no dump), with
+libx265, a QSV transcode, headless Chrome and a `dotnet publish` going at once. Not a crash of
+Windows; it has older minidumps from 2025.
+
 ## 2026-10-26, night: v0.1.7 as a core here, a Linux node, a camera on each
 
 The released setup.exe of v0.1.7, `/quiet Role=core Address=192.168.1.100`, over the standalone
