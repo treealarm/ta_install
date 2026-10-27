@@ -335,12 +335,21 @@ fetch_package() {
     read -rp "Enrollment is closed at $core. Administrator: " user
     read -rsp "Password: " pass; echo
   fi
-  status=$(jq -n --arg name "$name" --arg address "$address" --argjson mediaMtx "$([[ $mediamtx == 1 ]] && echo true || echo false)" \
-      --arg username "$user" --arg password "$pass" \
-      '{name: $name, address: $address, mediaMtx: $mediaMtx, username: $username, password: $password}' |
-    curl -sS --max-time 30 -o "$out" -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @- "$url/join") ||
-    die "$url/join did not answer"
-  [[ $status == 200 ]] || die "the core refused: $(jq -r '.error // .' "$out" 2>/dev/null || cat "$out")"
+  while :; do
+    status=$(jq -n --arg name "$name" --arg address "$address" --argjson mediaMtx "$([[ $mediamtx == 1 ]] && echo true || echo false)" \
+        --arg username "$user" --arg password "$pass" \
+        '{name: $name, address: $address, mediaMtx: $mediaMtx, username: $username, password: $password}' |
+      curl -sS --max-time 30 -o "$out" -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @- "$url/join") ||
+      die "$url/join did not answer"
+    # Open enrollment adds a node, but a new package for one already there (this machine installed
+    # over, or at a new address) takes an administrator's password all the same.
+    [[ $status == 401 && -z $user && -t 0 ]] || break
+    echo "$(jq -r '.error // .' "$out" 2>/dev/null)" >&2
+    read -rp "Administrator: " user
+    read -rsp "Password: " pass; echo
+  done
+  [[ $status == 200 ]] || die "the core refused: $(jq -r '.error // .' "$out" 2>/dev/null || cat "$out")$(
+    [[ $status == 401 && -z $user ]] && echo " (TAVMS_JOIN_USER and TAVMS_JOIN_PASSWORD give an administrator's)")"
 }
 
 cmd_join() {

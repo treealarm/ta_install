@@ -80,12 +80,15 @@ installation's log. The installer deletes a package once the node has joined wit
 **The core takes nodes in two stages.** While the deployment is being set up, enrollment is open:
 any machine that reaches the core's web joins. Once every server is in, close it in the web
 interface (Administration → Deployment, the switch under the list); from then on a new node needs an
-administrator's user name and password. The same page lists the deployment's servers and removes one
-that has no cameras left; removing one does not revoke its credentials yet. The core needs no
-restart for a new node: its VmsCfg keeps the deployment's nodes. A standalone installation
-can become the core by installing over it with `Role=core`; its MediaMTX server, which named
-`127.0.0.1`, then names the core's address (VmsCfg moves it when it starts). Any other change of
-role takes an uninstall first. An upgrade keeps the role.
+administrator's user name and password. A new package for a node already there — the computer
+installed over, or at a new address, which the node then moves to — takes them even while enrollment
+is open. Enrollment starts open on a new core only: a core upgraded from a version without the
+switch starts closed, and is opened there when a computer is to be added. The same page lists the
+deployment's servers and removes one that has no cameras left; removing one does not revoke its
+credentials yet. The core needs no restart for a new node: its VmsCfg keeps the deployment's nodes.
+A standalone installation can become the core by installing over it with `Role=core`; its MediaMTX
+server, which named `127.0.0.1`, then names the core's address (VmsCfg moves it when it starts). Any
+other change of role takes an uninstall first. An upgrade keeps the role.
 
 - **A node's services carry its name**: `vms-hall`, `vmsfs-hall`, `vmsonvif-hall`,
   `vmsonvif-actors-hall`, `vmslogger-hall`, `web-vms-hall`. Its cameras are added with server

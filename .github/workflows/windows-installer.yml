@@ -417,6 +417,10 @@ jobs:
             if (-not ($listing -contains $entry)) { throw "the package has no $entry" }
           }
           "ok   node package from the web, while enrollment is open"
+          # Not a second one for the same node, though: that would let anyone become it, unseen.
+          $r = Invoke-WebRequest "$base/api/deployment/join" -Method Post -ContentType 'application/json' -Body $join -SkipHttpErrorCheck
+          if ($r.StatusCode -ne 401) { throw "a second package for vms-ci without a password answered $($r.StatusCode)" }
+          "ok   no second package for a node without the administrator's password"
           $auth = @{ Authorization = "Bearer $token" }
           $nodes = Invoke-RestMethod "$base/api/deployment/nodes" -Headers $auth
           $nodes | Format-Table serverId, name, address, mediaMtx, configured

@@ -168,15 +168,18 @@ scripts/distributed.sh join --core 192.168.1.10 --name hall 192.168.1.20    # --
 scripts/distributed.sh up -d
 ```
 
-**The core takes nodes in two stages.** While the deployment is being set up, enrollment is open:
-a machine that reaches the core's web joins without a password. Once every server is in, close it
-in the web UI (Administration → Deployment, the switch under the list); from then on a new node
-joins only with an administrator's user name and password — `TAVMS_JOIN_USER` and
-`TAVMS_JOIN_PASSWORD`, or typed when `join` asks. The same page lists the deployment's servers and
-removes one that has no cameras left (its credentials are not revoked yet). Its "+" makes a node's
-package as a file, for a machine that cannot reach the core's web or is set up by a script:
-`scripts/distributed.sh join node-hall.tar.gz 192.168.1.20`. The core needs no restart for a new
-node: its VmsCfg keeps the deployment's nodes.
+**The core takes nodes in two stages.** While the deployment is being set up, enrollment is open: a
+machine that reaches the core's web joins without a password. Once every server is in, close it in
+the web UI (Administration → Deployment, the switch under the list); from then on a new node joins
+only with an administrator's user name and password — `TAVMS_JOIN_USER` and `TAVMS_JOIN_PASSWORD`,
+or typed when `join` asks. A new package for a node already there — the machine installed over, or
+at a new address, which the node then moves to — takes them even while enrollment is open.
+Enrollment starts open on a new core only: an installation upgraded from a version without the
+switch starts closed, and is opened there when a machine is to be added. The same page lists the
+deployment's servers and removes one that has no cameras left (its credentials are not revoked yet).
+Its "+" makes a node's package as a file, for a machine that cannot reach the core's web or is set
+up by a script: `scripts/distributed.sh join node-hall.tar.gz 192.168.1.20`. The core needs no
+restart for a new node: its VmsCfg keeps the deployment's nodes.
 
 A core made with an earlier version signed tokens with Ed25519, which VmsCfg cannot: make it again
 with `core` (after `down` and moving `data/distributed` aside) to take nodes this way.
