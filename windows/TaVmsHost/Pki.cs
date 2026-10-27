@@ -111,10 +111,10 @@ internal static class Pki
   }
 
   /// <summary>
-  /// A certificate for one machine's address, with the CA after it in the PEM: a machine joining sees
-  /// the CA in the handshake and checks it against the fingerprint it was given. Its CN is not the
-  /// bare address on purpose: OpenSSL reads a CN that looks like a host name against the CA's DNS
-  /// constraint, and would refuse it.
+  /// A certificate for one machine's address, with the CA after it in the PEM: the one file is the
+  /// whole chain, and where the web finds the authority it offers for download (web_srv's TlsEndpoint;
+  /// .NET leaves a self-signed root out of the handshake). Its CN is not the bare address on purpose:
+  /// OpenSSL reads a CN that looks like a host name against the CA's DNS constraint, and would refuse it.
   /// </summary>
   public static (string CertPem, string KeyPem) IssueServerCertificate(TlsAuthority ca, string address, DateTimeOffset now)
   {

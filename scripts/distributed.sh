@@ -170,9 +170,10 @@ make_tls_ca() {
 }
 
 # A certificate for one machine's address, written to $2/server.crt and server.key. The CA follows it
-# in server.crt, so that a machine joining sees the CA in the handshake and checks it against the
-# fingerprint it was given. Its CN is not the bare address on purpose: OpenSSL reads a CN that looks
-# like a host name against the CA's DNS constraint, and would refuse it.
+# in server.crt: the one file is the whole chain, and where the web finds the authority it offers for
+# download (web_srv's TlsEndpoint; .NET leaves a self-signed root out of the handshake). Its CN is not
+# the bare address on purpose: OpenSSL reads a CN that looks like a host name against the CA's DNS
+# constraint, and would refuse it.
 issue_server_cert() {
   local address=$1 dir=$2
   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$dir/server.key"
