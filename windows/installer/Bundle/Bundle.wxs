@@ -40,7 +40,9 @@
          the UAC prompt, the wizard's own ShellExecuteEx of the .url failed with "no application is
          associated" (0x80070483) on the test machine, though the same call worked from every other
          process tried there, and from the wizard when it was started elevated. Explorer also opens
-         the browser as the user, never elevated. -->
+         the browser as the user, never elevated. It cannot parse a path with a doubled '\' and opens
+         Documents instead, so InstallFolder comes without a trailing '\' (BAFunctions,
+         OnDetectComplete). -->
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
         Theme="hyperlinkLicense"

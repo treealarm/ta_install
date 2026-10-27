@@ -394,6 +394,23 @@ public:
       m_scan.join();
   }
 
+  // InstallFolder without a trailing '\', whichever way it came. Read back from the registry on an
+  // upgrade it has one, since the MSI writes [INSTALLFOLDER] there; so may one given on the command
+  // line. The Open button's "[InstallFolder]\TreeAlarm VMS.url" (Bundle.wxs) then doubles it, and
+  // explorer.exe, which cannot parse that path, opens Documents instead of the browser. The default,
+  // "[ProgramFiles64Folder]TreeAlarm VMS", has none and is left as it is, unformatted.
+  STDMETHODIMP OnDetectComplete(HRESULT hrStatus, BOOL fEligibleForCleanup) override
+  {
+    auto folder = GetVariable(L"InstallFolder");
+    if (folder.size() > 3 && (folder.back() == L'\\' || folder.back() == L'/'))
+    {
+      while (folder.size() > 3 && (folder.back() == L'\\' || folder.back() == L'/'))
+        folder.pop_back();
+      BalSetStringVariable(L"InstallFolder", folder.c_str(), FALSE);
+    }
+    return __super::OnDetectComplete(hrStatus, fEligibleForCleanup);
+  }
+
   STDMETHODIMP OnThemeControlLoaded(LPCWSTR wzName, WORD wId, HWND hWnd, BOOL* pfProcessed) override
   {
     if (IsNamed(wzName, AddressListControl))
