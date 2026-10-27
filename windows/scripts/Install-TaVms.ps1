@@ -178,6 +178,11 @@ function Initialize-Role {
   if ($TheRole -eq 'core' -and (Test-Path $signingKey)) {
     & icacls.exe $signingKey /grant "${SidLocalService}:(R)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "icacls $signingKey failed: $LASTEXITCODE" }
+    # The deployment's TLS certificate authority, which a core made before it had one gets now, and
+    # the core's own certificate, renewed when it is about to end: every install and upgrade of a core
+    # passes here, as every `distributed.sh up` does on Linux.
+    Invoke-Checked $hostExe @('tls', '--data', $DataDir)
+    Write-Step "the fingerprint of this core's certificate authority, which a machine joining checks: $(& $hostExe fingerprint --data $DataDir)"
   }
   if ($TheRole -eq 'node' -and -not (Test-Path (Join-Path $dist 'shared.env'))) {
     Assert-OwnAddress

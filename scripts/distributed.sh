@@ -6,6 +6,7 @@
 #   On the core:
 #     scripts/distributed.sh core <this machine's address>
 #     scripts/distributed.sh up | down | ps | logs ...    (compose with the right files)
+#     scripts/distributed.sh fingerprint                  (of the core's TLS certificate authority)
 #   On a node, asking the core's web for its package (VmsCfg keeps the deployment's nodes):
 #     scripts/distributed.sh join --core <core address[:web port]> --name <node> <this machine's address> [--no-mediamtx]
 #     scripts/distributed.sh up
@@ -145,6 +146,65 @@ require_own_passwords() {
   [[ "$(env_value RABBITMQ_DEFAULT_PASS)" != vms ]] || die "set RABBITMQ_DEFAULT_PASS in .env: RabbitMQ is reachable from the nodes"
 }
 
+# The deployment's own TLS, for what crosses the LAN in the clear otherwise: a CA of this core, and
+# under it a certificate for a machine's address. Not Sentry's root: that one signs Sentry's online
+# issuer, carries no constraints, and has no place in the machines' trust stores, where this one goes.
+# The core's VmsCfg holds this CA's key to issue the certificates of the nodes that join, so the CA
+# vouches for private addresses only (RFC 1918, and 100.64/10 of CGNAT and VPN overlays) and for no
+# DNS name at all: tavms.invalid is the one name it permits, and it never resolves.
+# Windows makes the same files (windows/TaVmsHost/Pki.cs).
+TLS_CA_DAYS=3650
+# What Apple's platforms accept of a server certificate. The core's is renewed at `up` from
+# TLS_RENEW_DAYS before its end.
+TLS_SERVER_DAYS=825
+TLS_RENEW_DAYS=60
+TLS_NAME_CONSTRAINTS="permitted;IP:10.0.0.0/255.0.0.0,permitted;IP:172.16.0.0/255.240.0.0"
+TLS_NAME_CONSTRAINTS+=",permitted;IP:192.168.0.0/255.255.0.0,permitted;IP:100.64.0.0/255.192.0.0"
+TLS_NAME_CONSTRAINTS+=",permitted;DNS:tavms.invalid"
+
+make_tls_ca() {
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$DIST/core/tls-ca.key"
+  openssl req -x509 -new -key "$DIST/core/tls-ca.key" -subj "/CN=TreeAlarm VMS CA $1" -days "$TLS_CA_DAYS" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "nameConstraints=critical,$TLS_NAME_CONSTRAINTS" -out "$DIST/tls/ca.crt"
+}
+
+# A certificate for one machine's address, written to $2/server.crt and server.key. The CA follows it
+# in server.crt, so that a machine joining sees the CA in the handshake and checks it against the
+# fingerprint it was given. Its CN is not the bare address on purpose: OpenSSL reads a CN that looks
+# like a host name against the CA's DNS constraint, and would refuse it.
+issue_server_cert() {
+  local address=$1 dir=$2
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$dir/server.key"
+  openssl req -new -key "$dir/server.key" -subj "/CN=TreeAlarm VMS $address" |
+    openssl x509 -req -CA "$DIST/tls/ca.crt" -CAkey "$DIST/core/tls-ca.key" -set_serial "0x$(openssl rand -hex 16)" \
+      -days "$TLS_SERVER_DAYS" -out "$dir/server.crt" -extfile <(printf '%s\n' "basicConstraints=critical,CA:FALSE" \
+        "keyUsage=critical,digitalSignature" "extendedKeyUsage=serverAuth" "subjectAltName=IP:$address" \
+        "authorityKeyIdentifier=keyid") 2>/dev/null
+  cat "$DIST/tls/ca.crt" >> "$dir/server.crt"
+}
+
+# On the core: the CA once, and the core's own certificate whenever it is missing or about to end. A
+# core made before it had a CA gets one here, on its next `up`.
+ensure_core_tls() {
+  local address
+  address=$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")
+  (
+    umask 077
+    mkdir -p "$DIST/tls"
+    [[ -f "$DIST/core/tls-ca.key" ]] || make_tls_ca "$address"
+    if ! openssl x509 -in "$DIST/tls/server.crt" -noout -checkend $((TLS_RENEW_DAYS * 86400)) >/dev/null 2>&1; then
+      issue_server_cert "$address" "$DIST/tls"
+      echo "TLS certificate for $address issued, valid for $TLS_SERVER_DAYS days"
+    fi
+  )
+}
+
+# What a machine joining checks the core against, as browsers show it: SHA-256 of the CA, in hex pairs.
+tls_fingerprint() {
+  openssl x509 -in "$DIST/tls/ca.crt" -noout -fingerprint -sha256 | cut -d= -f2
+}
+
 # The sidecars of a profile: their configurations, and their tokens when this machine holds the key.
 write_sidecars() {
   local profile=$1 node=${2:-} id port
@@ -211,7 +271,10 @@ EOF
   write_components 127.0.0.1
   mint_token "spiffe://localhost/ns/default/dapr-placement" > "$DIST/core/placement.token"
   write_sidecars core
+  ensure_core_tls
   echo "core ready: $DIST. Start it with: scripts/distributed.sh up"
+  echo "The fingerprint of its certificate authority, which a machine joining checks it against:"
+  echo "  $(tls_fingerprint)"
 }
 
 # This machine's own part of the environment, after the shared part, as one file compose reads.
@@ -312,8 +375,12 @@ cmd_join() {
 case "${1:-}" in
   core) shift; cmd_core "$@" ;;
   join) shift; cmd_join "$@" ;;
+  fingerprint)
+    [[ -f "$DIST/tls/ca.crt" ]] || die "no $DIST/tls/ca.crt: on a core, 'distributed.sh up' makes it"
+    tls_fingerprint ;;
   up|down|ps|logs|pull|restart|stop|start|config|exec)
     [[ -f "$DIST/distributed.env" ]] || die "run 'distributed.sh core' or 'distributed.sh join' first"
+    if [[ $1 == up ]] && grep -qx 'TAVMS_ROLE=core' "$DIST/distributed.env"; then ensure_core_tls; fi
     profiles=(--profile "$(sed -n 's/^TAVMS_ROLE=//p' "$DIST/distributed.env")")
     if grep -qx 'TAVMS_ROLE=node' "$DIST/distributed.env" && grep -qx 'TAVMS_MEDIAMTX=1' "$DIST/distributed.env"; then
       profiles+=(--profile node-mediamtx)

@@ -19,9 +19,15 @@ namespace TaVmsHost;
 //   TaVmsHost join <package> <address> [--no-mediamtx]
 //                                     on a node, with a package made in the core's web; without
 //                                     MediaMTX its cameras publish to the core's
+//   TaVmsHost tls                     on the core: its TLS certificate authority if it has none yet,
+//                                     and its own certificate when missing or about to end
+//   TaVmsHost fingerprint             the fingerprint of that certificate authority
 //
 //   core\           root.key: the root's key, closed to the service account; jwt.key, which signs
-//                   the tokens, readable by it, since VmsCfg signs the tokens of nodes that join
+//                   the tokens, readable by it, since VmsCfg signs the tokens of nodes that join;
+//                   tls-ca.key, the key of the deployment's TLS certificate authority
+//   tls\            ca.crt, that authority; server.crt (followed by ca.crt) and server.key, the
+//                   certificate this machine presents on the LAN (core)
 //   sentry\         ca.crt, issuer.crt, issuer.key, config.yaml: what Sentry runs on (core)
 //   tokens\         <app id>.token for each sidecar of this machine; on the core also
 //                   dapr-placement.token (on Linux it sits in core\, which LocalService cannot read)
@@ -76,6 +82,7 @@ internal static class Distributed
       $"CONSUL_ENCRYPT={consulKey}",
       // Quoted over several lines, which compose and EnvFile read back as one value.
       $"DAPR_TRUST_ANCHORS=\"{authority.RootCertPem.TrimEnd('\n')}\"") + "\n");
+    EnsureCoreTls(dir, ip, now, output);
 
     SiteEnv.Set(StackConfig.SiteEnvPath(config.Data),
     [
@@ -89,6 +96,56 @@ internal static class Distributed
     // A MediaMTX row a standalone installation seeded at 127.0.0.1 is moved to VMS_MTX_HOST by
     // VmsCfg itself, on its next start.
     output.WriteLine($"This machine is the core at {ip}: {dir}");
+    output.WriteLine("The fingerprint of its certificate authority, which a machine joining checks it against:");
+    output.WriteLine($"  {Fingerprint(config)}");
+  }
+
+  /// <summary>
+  /// On the core: the TLS certificate authority once, and the core's own certificate whenever it is
+  /// missing or about to end. A core made before it had a CA gets one here. Install-TaVms.ps1 runs it
+  /// on every install and upgrade of a core, as `distributed.sh up` does on Linux.
+  /// </summary>
+  public static void EnsureCoreTls(StackConfig config, TextWriter output)
+  {
+    if (config.Role != Role.Core)
+      throw new InvalidOperationException($"this machine is a {config.Role.Name()}, not a core");
+    var shared = ParseEnv(File.ReadAllText(Path.Combine(config.DistributedDir, "shared.env")), "shared.env");
+    EnsureCoreTls(config.DistributedDir, shared["CORE_ADDRESS"], DateTimeOffset.UtcNow, output);
+  }
+
+  internal static void EnsureCoreTls(string dir, string address, DateTimeOffset now, TextWriter output)
+  {
+    var caKeyPath = Path.Combine(dir, "core", "tls-ca.key");
+    var caCertPath = Path.Combine(dir, "tls", "ca.crt");
+    Pki.TlsAuthority ca;
+    if (File.Exists(caKeyPath))
+    {
+      ca = new Pki.TlsAuthority(File.ReadAllText(caCertPath), File.ReadAllText(caKeyPath));
+    }
+    else
+    {
+      ca = Pki.CreateTlsAuthority(address, now);
+      WriteText(caKeyPath, ca.KeyPem);
+      WriteText(caCertPath, ca.CertPem);
+    }
+
+    var serverCertPath = Path.Combine(dir, "tls", "server.crt");
+    if (File.Exists(serverCertPath) && !Pki.NeedsRenewal(File.ReadAllText(serverCertPath), now))
+      return;
+    var (cert, key) = Pki.IssueServerCertificate(ca, address, now);
+    // The key first: a run cut short in between leaves no certificate, and the next one issues both.
+    WriteText(Path.Combine(dir, "tls", "server.key"), key);
+    WriteText(serverCertPath, cert);
+    output.WriteLine($"TLS certificate for {address} issued, valid for {Pki.TlsServerLifetime.TotalDays:0} days");
+  }
+
+  /// <summary>The fingerprint of this deployment's TLS certificate authority, as browsers show it.</summary>
+  public static string Fingerprint(StackConfig config)
+  {
+    var path = Path.Combine(config.DistributedDir, "tls", "ca.crt");
+    return File.Exists(path)
+      ? Pki.Fingerprint(File.ReadAllText(path))
+      : throw new InvalidOperationException($"no {path}: on a core, 'TaVmsHost tls' makes it");
   }
 
   /// <summary>
