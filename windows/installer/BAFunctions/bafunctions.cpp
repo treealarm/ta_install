@@ -213,6 +213,43 @@ namespace
       port = DefaultWebPort;
   }
 
+  // Whether anything takes a TCP connection there within the time given. WinHTTP's own connect
+  // timeout does not hold for an address nobody has: it waits out ARP or the SYN's retransmissions,
+  // about 4 s, and the search over a mostly empty /24 took close to a minute. Winsock must be up.
+  bool Reachable(const std::wstring& hostPort, DWORD timeoutMs)
+  {
+    std::wstring host;
+    INTERNET_PORT port = 0;
+    SplitHostPort(hostPort, host, port);
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = ::htons(port);
+    if (::InetPtonW(AF_INET, host.c_str(), &to.sin_addr) != 1)
+      return true; // a name rather than an address: left to WinHTTP
+    const SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET)
+      return true;
+    u_long nonBlocking = 1;
+    bool connected = false;
+    if (::ioctlsocket(s, FIONBIO, &nonBlocking) != 0)
+      connected = true; // cannot bound the wait here: left to WinHTTP
+    else if (::connect(s, reinterpret_cast<const sockaddr*>(&to), sizeof(to)) == 0)
+      connected = true;
+    else if (::WSAGetLastError() == WSAEWOULDBLOCK)
+    {
+      // A refused or failed connection is reported in the exception set, never as writable.
+      fd_set writable, failed;
+      FD_ZERO(&writable);
+      FD_SET(s, &writable);
+      FD_ZERO(&failed);
+      FD_SET(s, &failed);
+      timeval wait{ static_cast<long>(timeoutMs / 1000), static_cast<long>(timeoutMs % 1000) * 1000 };
+      connected = ::select(0, nullptr, &writable, &failed, &wait) > 0 && FD_ISSET(s, &writable);
+    }
+    ::closesocket(s);
+    return connected;
+  }
+
   // One plain HTTP request to a web of this product, never through a proxy: the core is on the LAN.
   bool Http(const std::wstring& hostPort, LPCWSTR verb, LPCWSTR path, const std::string& body, DWORD timeoutMs, HttpAnswer& answer)
   {
@@ -486,6 +523,8 @@ private:
     // The core's address, and its machine name once the core itself has answered: a node's web
     // answers too, with its core's address.
     std::map<std::wstring, std::wstring> cores;
+    WSADATA wsa{};
+    const bool winsock = ::WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
     std::vector<std::thread> workers;
     for (int i = 0; i < ScanThreads; ++i)
     {
@@ -494,7 +533,8 @@ private:
         for (size_t at; !m_stopping && (at = next++) < targets.size();)
         {
           HttpAnswer answer;
-          if (!Http(targets[at], L"GET", L"/api/deployment", {}, ScanTimeoutMs, answer)
+          if ((winsock && !Reachable(targets[at], ScanTimeoutMs))
+              || !Http(targets[at], L"GET", L"/api/deployment", {}, ScanTimeoutMs, answer)
               || answer.status != 200 || !JsonTrue(answer.body, "distributed"))
             continue;
           const auto core = JsonField(answer.body, "coreAddress");
@@ -509,6 +549,8 @@ private:
     }
     for (auto& worker : workers)
       worker.join();
+    if (winsock)
+      ::WSACleanup();
     if (m_stopping)
       return;
 
