@@ -46,10 +46,10 @@ olga's console session.
 at about 0.3 MB/s per connection, 35 minutes for 1 GB. Fetched on the Linux machine in 32 ranges in
 parallel (curl `-r`, about 5 minutes) and passed over the LAN in one to three minutes.
 
-## 2026-10-27: QSV on an Intel iGPU, and a developer's laptop as the host
+## 2026-10-27: QSV on an Intel iGPU, and a developer's desktop as the host
 
 A fresh standalone install from CI run 40475634878 (ta_install 229935a, ta_vms d596529) on an
-i7-12700 laptop with UHD 770 and no other GPU: Windows 11 26200, Intel graphics driver 30.0.101.1371
+i7-12700 desktop with UHD 770 and no other GPU: Windows 11 26200, Intel graphics driver 30.0.101.1371
 of February 2022, not updated. No `VMS_VIDEO_ENCODER`. Source: 1080p25 HEVC from `testsrc`
 (libx265 ultrafast, GOP 50) published into the installation's own MediaMTX, `transcode_hevc` on,
 one viewer in headless Chrome on the same machine, CPU over 30 s.
@@ -105,9 +105,12 @@ token. Restarting web-vms or keycloak alone did not do it. Fixed in ta_vms (not 
 installer): the refresh answers 503 unless Keycloak refused the token, and the browser keeps the
 session on a refresh nobody answered.
 
-The laptop switched itself off once during the run (Kernel-Power 41, bugcheck 0, no dump), with
-libx265, a QSV transcode, headless Chrome and a `dotnet publish` going at once. Not a crash of
-Windows; it has older minidumps from 2025.
+The machine switched itself off once during the run (Kernel-Power 41, bugcheck 0, no dump), with
+libx265, a QSV transcode, headless Chrome and a `dotnet publish` going at once. The next day it
+crashed again under a vcpkg build, with nothing of ours running: bugcheck 0x1E with C0000006 (an
+in-page error), and the dump could not be written. WER holds older 0x7A KERNEL_DATA_INPAGE_ERROR
+and 0x154 crashes as well. CPU at 30 % and full clock, so not heat: the machine's
+own disk or memory, not something these results depend on.
 
 ## 2026-10-26, night: v0.1.7 as a core here, a Linux node, a camera on each
 
