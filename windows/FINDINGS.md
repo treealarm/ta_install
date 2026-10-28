@@ -101,9 +101,70 @@ socket, onvifserver. Nothing in the log says so. The installer could look for a 
 landed on the login page: web_srv answered 11 s after the restart and Keycloak 7 s later, the
 first API call got 401, the refresh got 401 as well — web_srv's `/api/auth/refresh` answered
 every failure that way, Keycloak not listening included — and the browser took that as a refused
-token. Restarting web-vms or keycloak alone did not do it. Fixed in ta_vms (not yet in an
-installer): the refresh answers 503 unless Keycloak refused the token, and the browser keeps the
-session on a refresh nobody answered.
+token. Restarting web-vms or keycloak alone did not do it. Fixed in ta_vms 16f4fba: the refresh
+answers 503 unless Keycloak refused the token, and the browser keeps the session on a refresh
+nobody answered.
+
+**2026-10-28, the installer with the fix.** CI run 40678095162 (ta_install fb1ef3b, ta_vms
+37c6bc6, which contains 16f4fba) over this install with `/quiet /norestart`: Burn planned an
+upgrade of the related bundle, **exit 0 after 199 s, `restart: None`**, 26 processes up, the new
+.NET 10.0.13 runtimes installed on the way. The camera `qsv-test` and the MediaMTX row
+(`transcode_hevc` on) were there afterwards. With onvifserver stopped and the source on
+`-pix_fmt yuv420p`, the same path as before: `decoding on d3d11va, encoding on 'h264_qsv (Intel
+VPL mfxExtEncoderROI)'`, vms at **10.4 % of a core** over 30 s with one viewer (GPU video decode
+8.7 %), clean 1920x1080 frames, 751 decoded in 30 s.
+
+- Three `Restart-Service TaVmsHost` with the tab open: it stayed signed in every time, and its
+  video came back by itself about a minute later. None of them reproduced the old failure,
+  though: web_srv started listening 4–6 s before Keycloak, but its first answers came only after
+  Keycloak was up — the window was never hit, so this alone proves nothing.
+- So the window was made instead, by killing Keycloak's `java.exe` alone (TaVmsHost restarts it;
+  13–17 s to listen). `/api/auth/refresh` then answered **503 `Identity provider unavailable`**,
+  for a valid refresh token and a garbage one alike; with Keycloak back, 200 and 401. In the tab,
+  the access token's signature spoiled in `localStorage` and the page reloaded: four API calls 401,
+  refresh 503, three rounds of that over 17 s, **no login page, the refresh token kept**, and the
+  first refresh after Keycloak was listening (3 s later) answered 200 and the tab went on.
+- Killing only `kc.bat`'s `cmd.exe` leaves its `java.exe` holding 5160, and every restart
+  TaVmsHost makes of keycloak then exits 1 until that java is killed. A normal stop takes the
+  whole tree, so this needs someone killing the wrapper; noted, not fixed.
+- **The first picture took 45–65 s after opening, here.** MediaMTX had the stream, but its answers
+  to WHEP offers took 3–3.5 s when they came in time and longer than web_srv's 4 s
+  (`WhepProxyService.MediaMtxOfferTimeout`) for the first minute: the browser got 503 and retried,
+  and MediaMTX closed each abandoned session with `deadline exceeded while waiting connection`. On
+  2026-10-27, on the same machine, a viewer started in 2 s. Measured further below.
+
+**The same, built here.** ta_vms 37c6bc6 built on this machine against `M:\vcpkg` at the
+CI-pinned c5a157 (ports 1.2 h, ffmpeg 9.0.1 with `qsv` and `nvcodec`; vms, .NET, tests, web
+client and zip 4 min; the installer 7 min), installed over the CI one: exit 0 after 168 s,
+`restart: None`, the camera and the MediaMTX row kept. Every check above came out the same:
+`backend: qsv ... opened; 2 declined before it`, `decoding on d3d11va`, vms at 10.2 % of a core,
+clean frames (751 decoded in 30 s), and with Keycloak killed the refresh answered 503, the tab
+went through three rounds of 401 → 503 and stayed signed in, and a `Restart-Service` kept it
+signed in too. The first attempt at the ports failed in aom with `strict.pm did not return a true
+value`: vcpkg's extracted Strawberry Perl held 884 files of nothing but zero bytes, written just
+before that morning's crash and never flushed. The archive was intact; deleting the extracted copy
+was enough.
+
+**How long a viewer waits, measured.** Four fresh browsers per setting opened the camera while
+the transcode was already running (another tab watching); the time is from the click to the first
+decoded frame, the offer from the browser's POST to web_srv's answer:
+
+| setting | first frame | WHEP offer answered |
+|---|---|---|
+| as installed | 7.0–8.6 s, once 14.8 s | 3.8–4.0 s, once 503 at the 4 s limit |
+| STUN URL of the MediaMTX row empty | 5.7–6.2 s, once 12.3 s | 3.8–3.9 s, once 503 |
+| MediaMTX on the Wi-Fi interface only (`webrtcIPsFromInterfacesList`) | 6.1–6.8 s | 3.0–3.2 s |
+| MediaMTX on 127.0.0.1 only (`webrtcAdditionalHosts`) | 6.8–8.2 s | 3.7–3.8 s |
+
+The empty STUN URL saves the browser's own gathering (up to 1.5 s) and nothing on MediaMTX's side,
+which has no STUN. The interfaces do not explain it either: one interface was a little faster,
+the loopback alone was not. At `logLevel: debug` a session went `connecting` 0.9 s after it was
+created and `connected` 4.1 s after, and the 201 reached the browser at 4.0 s: the answer comes
+when ICE has already connected, and the time goes into the connectivity checks. The remote
+candidate is always `prflx` — the browser's host candidates are mDNS names (`*.local`), which
+MediaMTX would have to resolve first; not verified. Since the answer takes 3–4 s and web_srv gives
+up at 4 s, about one offer in five fails on this machine and costs the viewer another 5–6 s, and a
+cold open (the transcode started by the click) took 15–17 s. Not fixed.
 
 The machine switched itself off once during the run (Kernel-Power 41, bugcheck 0, no dump), with
 libx265, a QSV transcode, headless Chrome and a `dotnet publish` going at once. The next day it
