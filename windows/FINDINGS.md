@@ -166,6 +166,18 @@ value`: vcpkg's extracted Strawberry Perl held 884 files of nothing but zero byt
 before that morning's crash and never flushed. The archive was intact; deleting the extracted copy
 was enough.
 
+**Eight streams on QSV.** Eight cameras on the one HEVC source, each push started through web_srv
+and kept up by an RTSP reader (`ffmpeg -c copy`): every one opened `h264_qsv` on D3D11VA, nothing
+declined or fell back to the CPU, every path out of MediaMTX at 563 kbit/s. vms used 25 % of a
+core with four and 38 % with eight; the GPU's video engine 28 % and 49 %.
+
+**web_srv's HTTPS on Windows.** A second `web_srv.Server.exe` of the installation, with the
+environment TaVmsHost gives web-vms, port 5199, `DAPR_HOST_IP=192.168.1.45` and a throwaway CA's
+certificate for that address: plain HTTP on the loopback, nothing but TLS 1.3 on the address, the
+leaf alone in the handshake, refused without the CA, and `ca.crt`, login and `/api/live/cameras`
+answering over HTTPS. (curl on Schannel needs `--ssl-no-revoke` against a CA without a CRL; so
+would anything else that checks revocation — a certificate of the core's CA has none either.)
+
 **How long a viewer waits, measured.** Four fresh browsers per setting opened the camera while
 the transcode was already running (another tab watching); the time is from the click to the first
 decoded frame, the offer from the browser's POST to web_srv's answer:
