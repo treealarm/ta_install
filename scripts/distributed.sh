@@ -315,8 +315,6 @@ write_machine_env() {
     echo "DAPR_PLACEMENT_PORT=6050"
     echo "DAPR_SENTRY_PORT=6055"
     echo "DAPR_ANALYTICS_WORKER_APP_IDS="
-    echo "DAPR_SQUARE_SINGLETON_APP_ID="
-    echo "SQUARE_INTEGRATION_SINK_APP_ID="
     # A node: the core's shared values, last, so that they win over this machine's .env.
     if [[ -f "$DIST/core.env" ]]; then cat "$DIST/core.env"; fi
   } > "$DIST/distributed.env"

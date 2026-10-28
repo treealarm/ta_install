@@ -60,7 +60,7 @@ authMethod: internal
 # Internal authentication.
 # Enabled users.
 # There is deliberately no 'any' user: anonymous access would let anyone who learns a camera UUID
-# (it is not a secret — it appears in the REST API and is pushed to Square) read that camera
+# (it is not a secret — it appears in the REST API and in links) read that camera
 # straight from here, bypassing web_vms and its per-camera permissions, and publish over it.
 # Passwords are injected from the environment (MTX_AUTHINTERNALUSERS_<i>_PASS, see
 # docker-compose.yml) so they never live in this file.

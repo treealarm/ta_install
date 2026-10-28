@@ -13,8 +13,7 @@
 // fixed port must stay below 49152 on Windows (see windows.env). The app learns its own through
 // DAPR_GRPC_PORT/DAPR_HTTP_PORT. docker-compose.distributed.yml uses the same numbers.
 //
-// Not here: roitrc and the analytics worker (no Windows build), VmsSquareSingleton (no Square
-// integration on Windows; see windows.env).
+// Not here: roitrc and the analytics worker (no Windows build).
 {
   "infrastructure": [
     // --- several machines: how they find each other and trust each other -------------------------

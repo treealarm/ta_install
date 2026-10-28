@@ -1,9 +1,8 @@
 # Standalone product deployment: own broker, own (default, isolated) docker network, no
-# `profiles:` gating — every service starts on a plain `docker compose up`, independent of
-# Square/multitenant_admin. Pulls prebuilt `treealarm/...` images published by
+# `profiles:` gating — every service starts on a plain `docker compose up`, independent of any
+# other project's stack. Pulls prebuilt `treealarm/...` images published by
 # scripts/push-images.sh (built by scripts/build-images.sh from sibling ta_vms / video_a
-# checkouts). Square integration stays off by default (SQUARE_INTEGRATION_SINK_APP_ID empty in
-# .env) per ta_vms CLAUDE.md's env-gating rule; login is on, through the keycloak service below.
+# checkouts). Login is on, through the keycloak service below.
 x-data-volume: &data-volume
   - ./data:/data
 
@@ -209,46 +208,6 @@ services:
     network_mode: "service:vmssingleton"
     depends_on:
       - vmssingleton
-
-  vmssquaresingleton:
-    image: treealarm/vmssquaresingleton:latest
-    logging: *logging
-    env_file:
-      - .env
-    environment:
-      APP_ID: vmssquaresingleton
-    # Exactly one instance: its startup resync pushes every camera into Square, and a second copy
-    # would push the whole tree again. See CLAUDE.md.
-    volumes: *data-volume
-    depends_on:
-      - vmscfg
-
-  vmssquaresingleton-dapr:
-    image: "daprio/daprd:latest"
-    logging: *logging
-    command:
-      - "./daprd"
-      - "-app-id"
-      - "vmssquaresingleton"
-      - "-app-port"
-      - "${SQUARE_SINGLETON_VMS_PORT}"
-      - "-app-protocol"
-      - "grpc"
-      - "-dapr-http-port"
-      - "3500"
-      - "-dapr-grpc-port"
-      - "50001"
-      - "-dapr-listen-addresses"
-      - "127.0.0.1"
-      - "-placement-host-address"
-      - "dapr-placement:50005"
-      - "-components-path"
-      - "/components"
-    volumes:
-      - ./init_files/dapr_components:/components
-    network_mode: "service:vmssquaresingleton"
-    depends_on:
-      - vmssquaresingleton
 
   vmsptztrackingsingleton:
     image: treealarm/vmsptztrackingsingleton:latest

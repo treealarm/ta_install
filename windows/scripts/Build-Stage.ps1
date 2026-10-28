@@ -10,7 +10,7 @@
 
     host\       TaVmsHost, the supervisor service
     vms\        vms.exe with its DLLs
-    dotnet\     one folder per .NET service (VmsSquareSingleton left out: no Square on Windows)
+    dotnet\     one folder per .NET service
     dapr\       daprd.exe, placement.exe
     mediamtx\   mediamtx.exe, and the same mediamtx.yml the Docker deployment mounts
     pgsql\      PostgreSQL binaries (pgAdmin, StackBuilder and the docs left out)
@@ -84,7 +84,6 @@ Move-Item (Join-Path $Stage 'ta_vms-tmp\redist\vc_redist.x64.exe') (Join-Path $S
 if (-not (Test-Path (Join-Path $Stage 'ta_vms-tmp\licenses\vcpkg'))) { throw 'the ta_vms build carries no licenses\vcpkg: it predates them' }
 Move-Item (Join-Path $Stage 'ta_vms-tmp\licenses') (Join-Path $Stage 'licenses')
 Remove-Item (Join-Path $Stage 'ta_vms-tmp') -Recurse -Force
-Remove-Item (Join-Path $Stage 'dotnet\VmsSquareSingleton') -Recurse -Force -ErrorAction SilentlyContinue
 foreach ($app in (Get-Content (Join-Path $windows 'config\services.json') -Raw | ConvertFrom-Json).apps) {
   if (-not (Test-Path (Join-Path $Stage $app.exe))) { throw "services.json names $($app.exe), which the ta_vms build does not contain" }
 }

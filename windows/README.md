@@ -7,7 +7,7 @@ processes, on one machine. Download it from the
 build as an artifact, and publishes it to a release on a `vX.Y.Z` tag.
 
 **Not in the Windows version:** `roitrc` (ROI re-compression of clips) and the analytics worker —
-neither builds for Windows — and the Square integration. Live HEVC is re-encoded to H.264 for
+neither builds for Windows. Live HEVC is re-encoded to H.264 for
 WebRTC on an NVIDIA card's encoder when the machine has one (driver 570 or later; a GeForce takes
 eight streams, and the rest go to the CPU), and on the CPU otherwise: there is no hardware encoder
 for Intel or AMD graphics on Windows yet.
@@ -122,8 +122,7 @@ other change of role takes an uninstall first. An upgrade keeps the role.
   machines of one deployment have to share one; PostgreSQL lets in that subnet too (`samenet`).
 - **Size**: Consul (196 MB) and Sentry (55 MB) are in every installation; only a core or node runs
   them.
-- **Not yet across machines**: analytics workers (there are none on Windows anyway) and the Square
-  integration.
+- **Not yet across machines**: analytics workers (there are none on Windows anyway).
 
 `TaVmsHost core <address>` and `join (<package> | --core <core> --name <node>) <address>` are what
 the installer runs; they keep their files in `C:\ProgramData\TreeAlarm\VMS\distributed` (the

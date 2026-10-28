@@ -8,7 +8,7 @@
 # machines reach it at. Apps listen on the loopback and are reached by their own sidecar only.
 #
 # The core runs everything docker-compose.yml runs, apart from what has no place in a distributed
-# deployment yet (the Square integration, the analytics worker and roitrc), and is a node too, with
+# deployment yet (the analytics worker and roitrc), and is a node too, with
 # the standalone app ids (vms, vmsfs, ...). A node runs its own vms/vmsfs/vmsonvif/vmsonvif-actors/
 # vmslogger as <app>-<node name>; its video goes to the core's MediaMTX.
 
