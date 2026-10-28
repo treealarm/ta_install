@@ -363,10 +363,23 @@ function Install-RabbitMq {
   $port = Get-StackValue 'RABBITMQ_PORT'
   $user = Get-StackValue 'RABBITMQ_DEFAULT_USER'
   $pass = Get-StackValue 'RABBITMQ_DEFAULT_PASS'
-  # Erlang distribution (25672) and epmd (4369) stay on every address, behind the cookie: the
-  # Windows service starts distribution before it reads this file, so a listener setting here does
-  # nothing, and with both forced onto the loopback rabbitmqctl, which looks the node up by the
-  # machine's name and so at its LAN address, could not reach it any more (tried on the test box).
+
+  # The node is tavms@localhost, not RabbitMQ's default rabbit@<this machine>. rabbitmqctl looks a
+  # node up by its host part, and the machine's name may resolve first to an address the machine
+  # cannot reach itself (a full-tunnel VPN: await_startup timed out and the install failed); another
+  # RabbitMQ on the machine is rabbit@<this machine> as well, and one of the two died at boot. On
+  # localhost both go away, and Erlang distribution (25672) and epmd (4369) can listen on the
+  # loopback only — nothing elsewhere needs them, a core's nodes speak AMQP. That has to be on erl's
+  # command line: the service starts distribution before it reads rabbitmq.conf. Every .bat here
+  # reads this file through RABBITMQ_BASE, rabbitmq-service.bat registers the service with it.
+  [IO.File]::WriteAllLines((Join-Path $base 'rabbitmq-env-conf.bat'), [string[]] @(
+    '@rem Written by Install-TaVms.ps1 on every install.',
+    'set NODENAME=tavms@localhost',
+    'set SERVER_ADDITIONAL_ERL_ARGS=-kernel inet_dist_use_interface {127,0,0,1} -env ERL_EPMD_ADDRESS 127.0.0.1'
+  ))
+  # The epmd rabbitmq-service.bat starts on the way, from this session (Stop-TaVms ended the old one).
+  $env:ERL_EPMD_ADDRESS = '127.0.0.1'
+
   # On one machine the loopback only; a core also listens at its address, for the nodes' pub/sub.
   $listeners = @("listeners.tcp.1 = 127.0.0.1:$port")
   if ($TheRole -eq 'core') { $listeners += "listeners.tcp.2 = $(Get-StackValue 'DAPR_HOST_IP'):$port" }
@@ -391,6 +404,10 @@ function Install-RabbitMq {
     Stop-Service $RabbitService -ErrorAction SilentlyContinue
     Invoke-Checked (Join-Path $sbin 'rabbitmq-service.bat') @('remove')
   }
+  # The database of a node by another name, from an installation before tavms@localhost. The new
+  # node starts empty: the user is made again below, and what was still queued is lost, which an
+  # event bus can afford.
+  Get-ChildItem (Join-Path $base 'db') -Filter 'rabbit@*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
   Invoke-Checked (Join-Path $sbin 'rabbitmq-service.bat') @('install')
   Invoke-Checked sc.exe @('config', $RabbitService, 'start=', 'auto')
   Invoke-Checked sc.exe @('description', $RabbitService, 'RabbitMQ for TreeAlarm VMS')

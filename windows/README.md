@@ -213,9 +213,10 @@ ta_vms build: `gh workflow run windows-installer.yml`.
   are on the loopback too, and its internal port on `DAPR_HOST_IP`, which is the loopback here.
   daprd listens on every address unless told otherwise, and its API calls any service and reads
   and writes the state store without asking who calls. What the LAN does reach is in the firewall
-  rules: web_srv, mt_admin, RTSP, WebRTC media and ONVIF discovery — and RabbitMQ's Erlang
-  distribution (25672) and epmd (4369), behind the cookie: the Windows service starts distribution
-  before it reads its configuration, and `rabbitmqctl` finds the node by the machine's name.
+  rules: web_srv, mt_admin, RTSP, WebRTC media and ONVIF discovery. RabbitMQ's node is
+  `tavms@localhost`, with its Erlang distribution (25672) and epmd (4369) on the loopback, set on
+  erl's command line (`rabbitmq-env-conf.bat` in its data directory), since the Windows service
+  starts distribution before it reads its configuration.
 - **App ids resolve through Dapr's `sqlite` resolver** on a standalone machine, not mDNS as in
   Docker (and through Consul on a core or node, above): every sidecar
   registers at `127.0.0.1` (`DAPR_HOST_IP`) in a file in the data directory. mDNS announced them at

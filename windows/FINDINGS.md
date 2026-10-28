@@ -81,14 +81,28 @@ was up, no address of the machine's own but the tunnel's was reachable from the 
 Excluding those subnets from the tunnel let the next install through (exit 0, 26 processes up, no
 restarts). A hosts entry does not help: Windows answers its own name from its adapters. The CLI
 finds the node by the machine's name (`Install-TaVms.ps1`, the comment above the listeners), so
-anything that makes the first address of that name unreachable fails the install. Not fixed.
-A node name on the loopback (`RABBITMQ_NODENAME`, for the service and every `rabbitmqctl` call)
-would take the machine's name out of it.
+anything that makes the first address of that name unreachable fails the install. Fixed on
+2026-10-28 with the node below.
 
 **A second RabbitMQ on the machine.** The developer's own RabbitMQ (`C:\Program Files\Erlang OTP`,
 service `RabbitMQ`, automatic) uses the node name `rabbit@ASUS-TUF` too. After a reboot both start
 and one dies: `RabbitMQ: Erlang machine stopped instantly (distribution name conflict?)`. Ours
 happened to win. A node name of our own (`tavms@localhost`) would avoid this and the VPN case both.
+
+Done on 2026-10-28 (`rabbitmq-env-conf.bat`, written by `Install-TaVms.ps1`), with distribution
+and epmd moved onto the loopback, which the machine's name had ruled out. Installed over the
+previous build: exit 0 after 239 s, the old `rabbit@ASUS-TUF` database deleted, the user made again
+on the new node, 26 processes up, the sidecars connected. Started cold (epmd killed first), the
+service brought epmd up on `127.0.0.1:4369` and `[::1]:4369` and distribution on
+`127.0.0.1:25672`. The developer's RabbitMQ could not be tried beside it: it no longer starts at
+all (`cannot get bootfile start_sasl.boot`, its own Erlang). The names no longer collide, but two
+brokers still want 5672 and 25672: ours takes a free AMQP port on its first install
+(`Get-FreePort 5672`), so it only meets the other on a port when the other was stopped then.
+
+The same install showed the other side of the 8554 fix below: onvifserver, failing to start every
+minute while MediaMTX held the port, got it while the installer had the stack stopped, and
+MediaMTX then could not start — this time with `mediamtx: port 8554 is held by onvifserver` in
+`TaVmsHost.log`. With two programs that both want 8554 and restart themselves, one has to go.
 
 **Port 8554 shared with another product, silently.** Elvees Orwell 2k's `onvifserver` (automatic)
 listens on `0.0.0.0:8554`. With it stopped the install was fine; after a reboot both were up,
