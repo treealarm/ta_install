@@ -21,7 +21,6 @@
     <ProjectGuid>{1B62512C-5A5B-44CE-AD84-9FD9AD330CB2}</ProjectGuid>
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <TargetName>BAFunctions</TargetName>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
@@ -29,6 +28,12 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!-- Whichever toolset the Visual Studio that builds this calls its own (v143 on the CI runner's
+       2022, v145 on a 2026) rather than one named here, which no other version has. The CRT is
+       linked statically, so nothing about the toolset reaches the machine the bundle runs on. -->
+  <PropertyGroup Label="Configuration">
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
 
   <PropertyGroup>
