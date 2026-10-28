@@ -56,9 +56,51 @@ internal static class Native
     }
   }
 
+  // The processes listening on a TCP port, on any address of either family. Possibly more than one:
+  // Windows lets one program listen on 0.0.0.0 and another on [::] at the same port, without an
+  // error for either.
+  public static IReadOnlyList<int> TcpListenerPids(int port)
+  {
+    var pids = new HashSet<int>();
+    // Row layouts of MIB_TCPROW_OWNER_PID and MIB_TCP6ROW_OWNER_PID: size, then the offsets of the
+    // local port (network byte order, in the low 16 bits) and of the owning process id.
+    foreach (var (family, rowSize, portAt, pidAt) in new[] { (AF_INET, 24, 8, 20), (AF_INET6, 56, 20, 52) })
+    {
+      var size = 0;
+      var error = GetExtendedTcpTable(IntPtr.Zero, ref size, false, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
+      while (error == ERROR_INSUFFICIENT_BUFFER)
+      {
+        var table = Marshal.AllocHGlobal(size);
+        try
+        {
+          // The table may have grown since its size was asked for; then the loop asks again.
+          error = GetExtendedTcpTable(table, ref size, false, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
+          if (error != 0) continue;
+          var count = Marshal.ReadInt32(table);
+          for (var i = 0; i < count; i++)
+          {
+            var row = table + 4 + i * rowSize;
+            var raw = Marshal.ReadInt32(row, portAt);
+            if (((raw & 0xFF) << 8 | (raw >> 8) & 0xFF) == port) pids.Add(Marshal.ReadInt32(row, pidAt));
+          }
+        }
+        finally
+        {
+          Marshal.FreeHGlobal(table);
+        }
+      }
+      if (error != 0) throw new Win32Exception(error);
+    }
+    return [.. pids];
+  }
+
   private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
   private const int JobObjectExtendedLimitInformation = 9;
   private const uint CTRL_C_EVENT = 0;
+  private const int AF_INET = 2;
+  private const int AF_INET6 = 23;
+  private const int TCP_TABLE_OWNER_PID_LISTENER = 3;
+  private const int ERROR_INSUFFICIENT_BUFFER = 122;
 
   [StructLayout(LayoutKind.Sequential)]
   private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
@@ -119,4 +161,7 @@ internal static class Native
 
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+
+  [DllImport("iphlpapi.dll")]
+  private static extern int GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize, bool bOrder, int ulAf, int tableClass, uint reserved);
 }

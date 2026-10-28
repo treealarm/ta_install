@@ -155,6 +155,17 @@ public sealed class StackConfigTests : IDisposable
     }
   }
 
+  // RTSP on IPv4 only, so that another program on 0.0.0.0:8554 fails to bind beside it instead of
+  // silently taking the publishes to 127.0.0.1; and the ports whose holder the host names if it exits.
+  [Fact]
+  public void MediaMTX_takes_its_RTSP_port_on_IPv4_and_names_its_ports()
+  {
+    var config = Load();
+    var mediamtx = config.Infra(config.Manifest.Infrastructure.Single(i => i.Name == "mediamtx"));
+    Assert.Equal("0.0.0.0:8554", mediamtx.Env["MTX_RTSPADDRESS"]);
+    Assert.Equal([8554, 8889, 9997], mediamtx.Ports);
+  }
+
   [Fact]
   public void Standalone_runs_neither_consul_nor_sentry_nor_tls()
   {
@@ -169,6 +180,7 @@ public sealed class StackConfigTests : IDisposable
     {
       var sidecar = config.Sidecar(app);
       Assert.DoesNotContain("--enable-mtls", sidecar.Args);
+      Assert.Null(sidecar.Ports);
       Assert.Equal(config.DaprConfigPath, sidecar.Args[sidecar.Args.ToList().IndexOf("--config") + 1]);
       Assert.Equal(["DAPR_HOST_IP"], sidecar.Env.Keys);
     }

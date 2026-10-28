@@ -8,7 +8,9 @@ internal sealed record ProcessSpec(
   IReadOnlyList<string> Args,
   // Added on top of the host's own environment, which every child inherits.
   IReadOnlyDictionary<string, string> Env,
-  string WorkingDirectory);
+  string WorkingDirectory,
+  // The TCP ports it listens on, for naming whoever else holds one when it exits (InfraProcess.Ports).
+  IReadOnlyList<int>? Ports = null);
 
 // Everything the host knows about the installation, resolved once at startup: where it lives, the
 // merged environment, what this machine is (Role), what it runs, and the command line of each.
@@ -146,7 +148,8 @@ internal sealed class StackConfig
     ResolveExe(p.Exe),
     (p.Args ?? []).Select(arg => Expand(arg, $"services.json {p.Name}.args")).ToList(),
     ExpandAll(p.Env, $"services.json {p.Name}.env"),
-    Path.GetDirectoryName(ResolveExe(p.Exe))!);
+    Path.GetDirectoryName(ResolveExe(p.Exe))!,
+    (p.Ports ?? []).Select(port => ParsePort(Expand(port, $"services.json {p.Name}.ports"), $"{p.Name}.ports")).ToList());
 
   // The same flags compose gives every sidecar, except that here all of them share one localhost,
   // so each needs ports of its own. daprd listens on every address unless told otherwise: its API

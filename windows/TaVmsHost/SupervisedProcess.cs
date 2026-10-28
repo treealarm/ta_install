@@ -132,6 +132,7 @@ internal sealed class SupervisedProcess : IAsyncDisposable
           backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxBackoff.Ticks));
           _log.LogError("{Name} exited with 0x{Code:X8}, restarting in {Delay:0}s (its output: {Log})",
             Name, LastExitCode, delay.TotalSeconds, $"host-logs\\{Name}.log");
+          ReportPortHolders();
         }
       }
 
@@ -260,6 +261,38 @@ internal sealed class SupervisedProcess : IAsyncDisposable
       {
         // Exited between the timeout and the kill.
       }
+    }
+  }
+
+  // A process that exits as soon as it starts has most often found its port taken. Its own log says
+  // "bind" and no more; this says by whom — Orwell's onvifserver, an automatic service, took 8554
+  // from MediaMTX on a developer's desktop. Anything still listening there now is not this process.
+  private void ReportPortHolders()
+  {
+    if (!OperatingSystem.IsWindows() || _spec.Ports is not { Count: > 0 } ports) return;
+    try
+    {
+      foreach (var port in ports)
+      {
+        foreach (var pid in Native.TcpListenerPids(port))
+        {
+          string owner;
+          try
+          {
+            using var holder = Process.GetProcessById(pid);
+            owner = holder.ProcessName;
+          }
+          catch (ArgumentException)
+          {
+            owner = "a process that has since exited";
+          }
+          _log.LogError("{Name}: port {Port} is held by {Owner} (pid {Pid})", Name, port, owner, pid);
+        }
+      }
+    }
+    catch (System.ComponentModel.Win32Exception ex)
+    {
+      _log.LogWarning("{Name}: could not list the listeners on its ports ({Error})", Name, ex.Message);
     }
   }
 

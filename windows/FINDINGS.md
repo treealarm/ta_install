@@ -94,8 +94,12 @@ happened to win. A node name of our own (`tavms@localhost`) would avoid this and
 listens on `0.0.0.0:8554`. With it stopped the install was fine; after a reboot both were up,
 MediaMTX on `[::]:8554` and onvifserver on `0.0.0.0:8554`, and Windows allows that pair without an
 error. A connection to `127.0.0.1:8554` — every publish from vms — reaches the more specific IPv4
-socket, onvifserver. Nothing in the log says so. The installer could look for a listener on
-`RTSP_PORT` before it starts MediaMTX, and say whose it is.
+socket, onvifserver. Nothing in the log says so. Fixed on 2026-10-28: MediaMTX's RTSP is on
+`0.0.0.0:8554` on Windows (`MTX_RTSPADDRESS`), so the second program to start fails to bind —
+onvifserver started after it now fails to start, and MediaMTX started after onvifserver exits with
+`bind: Only one usage of each socket address`, the host logging `mediamtx: port 8554 is held by
+onvifserver (pid ...)` with every restart, until the port is free and MediaMTX comes up by itself.
+The rest of the stack starts meanwhile (the 30 s wait for MediaMTX's API runs out).
 
 **Signed out by every restart of the service.** After `Restart-Service TaVmsHost` the open tab
 landed on the login page: web_srv answered 11 s after the restart and Keycloak 7 s later, the

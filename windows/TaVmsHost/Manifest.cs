@@ -75,7 +75,8 @@ internal sealed record Manifest(
 // placement, MediaMTX, Keycloak, Consul, Sentry: no sidecar. The next process starts once
 // ReadyPort accepts a connection at ReadyAddress (the loopback unless the process listens on the
 // machine's address only), or at once when there is none: nothing else waits for Keycloak, which
-// only web-vms calls, and only when somebody logs in.
+// only web-vms calls, and only when somebody logs in. Ports are the TCP ports it listens on: when it
+// exits, the host names whatever other process holds one of them, which its own log does not.
 internal sealed record InfraProcess(
   string Name,
   string Exe,
@@ -84,7 +85,8 @@ internal sealed record InfraProcess(
   string? ReadyPort,
   string? ReadyAddress,
   IReadOnlyList<string>? Roles,
-  string? When);
+  string? When,
+  IReadOnlyList<string>? Ports = null);
 
 internal sealed record DaprApp(
   string AppId,

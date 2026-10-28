@@ -224,7 +224,11 @@ ta_vms build: `gh workflow run windows-installer.yml`.
 - **The Dapr components are generated** from the environment on every start, so the passwords exist
   in one place only and there is nothing for `db-init` to cross-check.
 - **MediaMTX** uses the same `mediamtx.yml`; its Control API and WHEP listener are on the loopback
-  only (web_srv proxies WHEP), and RTMP, HLS and SRT — which nothing uses — are off.
+  only (web_srv proxies WHEP), and RTMP, HLS and SRT — which nothing uses — are off. Its RTSP is
+  on `0.0.0.0:8554`, not `[::]`: beside a dual-stack socket Windows lets another program take
+  `0.0.0.0:8554` without an error, and every publish to `127.0.0.1` then goes to it. On IPv4 the
+  second of the two to start fails instead, and when that is MediaMTX, `TaVmsHost.log` names the
+  program holding the port.
 - **Versions are pinned** (`versions.json`) where compose follows `latest`: an installer carries
   the binaries.
 
