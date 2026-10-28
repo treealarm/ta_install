@@ -13,6 +13,39 @@ internal static class Native
   // join the job by inheritance, so there is no window between starting one and assigning it.
   public static void KillChildrenWithHost()
   {
+    var job = CreateKillOnCloseJob();
+    if (!AssignProcessToJobObject(job, GetCurrentProcess()))
+      throw new Win32Exception();
+  }
+
+  // A job of one child's own, nested in the host's: whatever that child starts joins it too, so
+  // when the child exits, closing the job takes down what it left behind. Keycloak's kc.bat is the
+  // case: killed alone, it left its java listening on Keycloak's port, and every Keycloak started
+  // after it exited at once. A grandchild started in the instant before the assignment escapes.
+  public static IntPtr ContainProcessTree(IntPtr process)
+  {
+    var job = CreateKillOnCloseJob();
+    if (!AssignProcessToJobObject(job, process))
+    {
+      var error = new Win32Exception();
+      CloseHandle(job);
+      throw error;
+    }
+    return job;
+  }
+
+  // Closes a job from ContainProcessTree, killing every process still in it; says how many there were.
+  public static int CloseProcessTree(IntPtr job)
+  {
+    var info = new JOBOBJECT_BASIC_ACCOUNTING_INFORMATION();
+    var left = QueryInformationJobObject(job, JobObjectBasicAccountingInformation, ref info,
+      (uint)Marshal.SizeOf<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>(), IntPtr.Zero) ? (int)info.ActiveProcesses : 0;
+    CloseHandle(job);
+    return left;
+  }
+
+  private static IntPtr CreateKillOnCloseJob()
+  {
     var job = CreateJobObjectW(IntPtr.Zero, null);
     if (job == IntPtr.Zero) throw new Win32Exception();
 
@@ -26,15 +59,17 @@ internal static class Native
     {
       Marshal.StructureToPtr(info, ptr, false);
       if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ptr, (uint)size))
-        throw new Win32Exception();
+      {
+        var error = new Win32Exception();
+        CloseHandle(job);
+        throw error;
+      }
     }
     finally
     {
       Marshal.FreeHGlobal(ptr);
     }
-
-    if (!AssignProcessToJobObject(job, GetCurrentProcess()))
-      throw new Win32Exception();
+    return job;
   }
 
   // Runs in a short-lived helper process (`TaVmsHost send-ctrl-c <pid>`), never in the host: it has
@@ -95,12 +130,26 @@ internal static class Native
   }
 
   private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+  private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
   private const uint CTRL_C_EVENT = 0;
   private const int AF_INET = 2;
   private const int AF_INET6 = 23;
   private const int TCP_TABLE_OWNER_PID_LISTENER = 3;
   private const int ERROR_INSUFFICIENT_BUFFER = 122;
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+  {
+    public long TotalUserTime;
+    public long TotalKernelTime;
+    public long ThisPeriodTotalUserTime;
+    public long ThisPeriodTotalKernelTime;
+    public uint TotalPageFaultCount;
+    public uint TotalProcesses;
+    public uint ActiveProcesses;
+    public uint TotalTerminatedProcesses;
+  }
 
   [StructLayout(LayoutKind.Sequential)]
   private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
@@ -146,6 +195,13 @@ internal static class Native
 
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool QueryInformationJobObject(IntPtr hJob, int infoClass,
+    ref JOBOBJECT_BASIC_ACCOUNTING_INFORMATION lpInfo, uint cbInfo, IntPtr lpReturnLength);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool CloseHandle(IntPtr hObject);
 
   [DllImport("kernel32.dll")]
   private static extern IntPtr GetCurrentProcess();

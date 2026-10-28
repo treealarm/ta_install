@@ -28,6 +28,31 @@ public class NativeTests
     }
   }
 
+  // kc.bat's case: the wrapper dies, its child lives on. Closing the wrapper's job takes the child.
+  [Fact]
+  public void Closing_a_childs_job_kills_what_it_left_behind()
+  {
+    if (!OperatingSystem.IsWindows()) return;
+
+    var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping -n 60 127.0.0.1 >nul")
+    {
+      UseShellExecute = false,
+      CreateNoWindow = true,
+    };
+    var startedAfter = DateTime.Now.AddSeconds(-1);
+    using var wrapper = System.Diagnostics.Process.Start(psi)!;
+    var job = Native.ContainProcessTree(wrapper.Handle);
+    Thread.Sleep(1000);
+    var child = System.Diagnostics.Process.GetProcessesByName("PING").Single(p => p.StartTime > startedAfter);
+    wrapper.Kill(entireProcessTree: false);
+    wrapper.WaitForExit();
+    Assert.False(child.HasExited);
+
+    // The child, and the console host a hidden console comes with.
+    Assert.True(Native.CloseProcessTree(job) >= 1);
+    Assert.True(child.WaitForExit(5000));
+  }
+
   [Fact]
   public void Finds_nobody_on_a_port_nobody_listens_on()
   {

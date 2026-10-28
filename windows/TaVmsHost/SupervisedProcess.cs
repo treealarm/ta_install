@@ -21,6 +21,8 @@ internal sealed class SupervisedProcess : IAsyncDisposable
   private readonly Serilog.Core.Logger _output;
   private readonly object _gate = new();
   private Process? _process;
+  // The current process's own job (Native.ContainProcessTree); IntPtr.Zero when there is none.
+  private IntPtr _job;
   private DateTime _startedAt;
   private Task? _loop;
   private CancellationTokenSource? _stopping;
@@ -107,6 +109,7 @@ internal sealed class SupervisedProcess : IAsyncDisposable
         {
           return;
         }
+        ReleaseLeftovers();
 
         bool requested;
         lock (_gate)
@@ -184,6 +187,19 @@ internal sealed class SupervisedProcess : IAsyncDisposable
 
     var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
     if (!process.Start()) throw new InvalidOperationException($"{Name}: Process.Start returned false");
+    var job = IntPtr.Zero;
+    if (OperatingSystem.IsWindows())
+    {
+      try
+      {
+        job = Native.ContainProcessTree(process.Handle);
+      }
+      catch (System.ComponentModel.Win32Exception ex)
+      {
+        // It runs all the same; only what it leaves behind on an exit is not cleared up.
+        _log.LogWarning("{Name}: no job of its own ({Error})", Name, ex.Message);
+      }
+    }
     process.StandardInput.Close();
     PumpLines(process.StandardOutput, "stdout");
     PumpLines(process.StandardError, "stderr");
@@ -191,6 +207,7 @@ internal sealed class SupervisedProcess : IAsyncDisposable
     lock (_gate)
     {
       _process = process;
+      _job = job;
       _startedAt = DateTime.UtcNow;
     }
     _output.Write(LogEventLevel.Information, "{Line:l}", $"=== TaVmsHost started {_spec.FileName} (pid {process.Id})");
@@ -264,6 +281,22 @@ internal sealed class SupervisedProcess : IAsyncDisposable
     }
   }
 
+  // The process has exited; anything it started that is still running goes too, before the next
+  // start can find it holding a port or a file.
+  private void ReleaseLeftovers()
+  {
+    IntPtr job;
+    lock (_gate)
+    {
+      job = _job;
+      _job = IntPtr.Zero;
+    }
+    if (job == IntPtr.Zero || !OperatingSystem.IsWindows()) return;
+    var left = Native.CloseProcessTree(job);
+    if (left > 0)
+      _log.LogWarning("{Name} exited leaving {Count} process(es) of its own running; killed them", Name, left);
+  }
+
   // A process that exits as soon as it starts has most often found its port taken. Its own log says
   // "bind" and no more; this says by whom — Orwell's onvifserver, an automatic service, took 8554
   // from MediaMTX on a developer's desktop. Anything still listening there now is not this process.
@@ -320,6 +353,7 @@ internal sealed class SupervisedProcess : IAsyncDisposable
 
   public ValueTask DisposeAsync()
   {
+    ReleaseLeftovers();
     _output.Dispose();
     _stopping?.Dispose();
     return ValueTask.CompletedTask;

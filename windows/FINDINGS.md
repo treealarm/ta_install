@@ -130,7 +130,10 @@ VPL mfxExtEncoderROI)'`, vms at **10.4 % of a core** over 30 s with one viewer (
   first refresh after Keycloak was listening (3 s later) answered 200 and the tab went on.
 - Killing only `kc.bat`'s `cmd.exe` leaves its `java.exe` holding 5160, and every restart
   TaVmsHost makes of keycloak then exits 1 until that java is killed. A normal stop takes the
-  whole tree, so this needs someone killing the wrapper; noted, not fixed.
+  whole tree, so this needs someone killing the wrapper. Fixed the same day: each child runs in a
+  job of its own, closed when it exits — killing `kc.bat` alone now logs `keycloak exited leaving 2
+  process(es) of its own running; killed them` (java and the console host), and the next Keycloak
+  started at once.
 - **The first picture took 45–65 s after opening, here.** MediaMTX had the stream, but its answers
   to WHEP offers took 3–3.5 s when they came in time and longer than web_srv's 4 s
   (`WhepProxyService.MediaMtxOfferTimeout`) for the first minute: the browser got 503 and retried,
