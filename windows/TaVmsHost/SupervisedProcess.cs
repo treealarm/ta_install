@@ -292,9 +292,25 @@ internal sealed class SupervisedProcess : IAsyncDisposable
       _job = IntPtr.Zero;
     }
     if (job == IntPtr.Zero || !OperatingSystem.IsWindows()) return;
-    var left = Native.CloseProcessTree(job);
-    if (left > 0)
-      _log.LogWarning("{Name} exited leaving {Count} process(es) of its own running; killed them", Name, left);
+    // Named before the job is closed, while they still exist. The console host every hidden console
+    // comes with is not counted: it outlives its process by a moment, and goes anyway.
+    var left = Native.ProcessesIn(job).Select(Describe).Where(d => d is not null && !d.StartsWith("conhost ")).ToList();
+    Native.CloseProcessTree(job);
+    if (left.Count > 0)
+      _log.LogWarning("{Name} exited leaving {Left} running; killed", Name, string.Join(", ", left));
+
+    static string? Describe(int pid)
+    {
+      try
+      {
+        using var process = Process.GetProcessById(pid);
+        return $"{process.ProcessName} (pid {pid})";
+      }
+      catch (ArgumentException)
+      {
+        return null; // exited meanwhile
+      }
+    }
   }
 
   // A process that exits as soon as it starts has most often found its port taken. Its own log says

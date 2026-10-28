@@ -34,14 +34,33 @@ internal static class Native
     return job;
   }
 
-  // Closes a job from ContainProcessTree, killing every process still in it; says how many there were.
-  public static int CloseProcessTree(IntPtr job)
+  // Closes a job from ContainProcessTree, killing every process still in it.
+  public static void CloseProcessTree(IntPtr job) => CloseHandle(job);
+
+  // The processes still in a job from ContainProcessTree.
+  public static IReadOnlyList<int> ProcessesIn(IntPtr job)
   {
-    var info = new JOBOBJECT_BASIC_ACCOUNTING_INFORMATION();
-    var left = QueryInformationJobObject(job, JobObjectBasicAccountingInformation, ref info,
-      (uint)Marshal.SizeOf<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>(), IntPtr.Zero) ? (int)info.ActiveProcesses : 0;
-    CloseHandle(job);
-    return left;
+    // JOBOBJECT_BASIC_PROCESS_ID_LIST: two counts, then the ids as ULONG_PTRs. Room for 64 is far
+    // more than any child here leaves behind; beyond that the list is cut short, which only shortens
+    // what is reported — closing the job still kills them all.
+    const int capacity = 64;
+    var size = 2 * sizeof(uint) + capacity * IntPtr.Size;
+    var list = Marshal.AllocHGlobal(size);
+    var pids = new List<int>();
+    try
+    {
+      if (QueryInformationJobObject(job, JobObjectBasicProcessIdList, list, (uint)size, IntPtr.Zero))
+      {
+        var count = Marshal.ReadInt32(list, sizeof(uint));
+        for (var i = 0; i < count; i++)
+          pids.Add((int)Marshal.ReadIntPtr(list, 2 * sizeof(uint) + i * IntPtr.Size));
+      }
+    }
+    finally
+    {
+      Marshal.FreeHGlobal(list);
+    }
+    return pids;
   }
 
   private static IntPtr CreateKillOnCloseJob()
@@ -130,26 +149,13 @@ internal static class Native
   }
 
   private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
-  private const int JobObjectBasicAccountingInformation = 1;
+  private const int JobObjectBasicProcessIdList = 3;
   private const int JobObjectExtendedLimitInformation = 9;
   private const uint CTRL_C_EVENT = 0;
   private const int AF_INET = 2;
   private const int AF_INET6 = 23;
   private const int TCP_TABLE_OWNER_PID_LISTENER = 3;
   private const int ERROR_INSUFFICIENT_BUFFER = 122;
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
-  {
-    public long TotalUserTime;
-    public long TotalKernelTime;
-    public long ThisPeriodTotalUserTime;
-    public long ThisPeriodTotalKernelTime;
-    public uint TotalPageFaultCount;
-    public uint TotalProcesses;
-    public uint ActiveProcesses;
-    public uint TotalTerminatedProcesses;
-  }
 
   [StructLayout(LayoutKind.Sequential)]
   private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
@@ -197,8 +203,7 @@ internal static class Native
   private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
 
   [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool QueryInformationJobObject(IntPtr hJob, int infoClass,
-    ref JOBOBJECT_BASIC_ACCOUNTING_INFORMATION lpInfo, uint cbInfo, IntPtr lpReturnLength);
+  private static extern bool QueryInformationJobObject(IntPtr hJob, int infoClass, IntPtr lpInfo, uint cbInfo, IntPtr lpReturnLength);
 
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool CloseHandle(IntPtr hObject);

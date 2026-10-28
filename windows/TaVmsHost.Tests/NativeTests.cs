@@ -49,7 +49,8 @@ public class NativeTests
     Assert.False(child.HasExited);
 
     // The child, and the console host a hidden console comes with.
-    Assert.True(Native.CloseProcessTree(job) >= 1);
+    Assert.Contains(child.Id, Native.ProcessesIn(job));
+    Native.CloseProcessTree(job);
     Assert.True(child.WaitForExit(5000));
   }
 
