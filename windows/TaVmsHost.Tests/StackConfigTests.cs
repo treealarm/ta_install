@@ -107,7 +107,6 @@ public sealed class StackConfigTests : IDisposable
     var ids = Load().Manifest.Apps.Select(a => a.AppId).ToList();
     Assert.DoesNotContain("roitrc", ids);
     Assert.DoesNotContain("analytics-worker", ids);
-    Assert.DoesNotContain("vmssquaresingleton", ids);
   }
 
   [Fact]

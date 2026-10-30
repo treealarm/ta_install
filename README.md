@@ -4,8 +4,7 @@
 
 Standalone product deployment for the TreeAlarm VMS: the `ta_vms` services plus the `video_a`
 analytics worker, packaged as one docker-compose stack. Self-contained — its own database, its own
-broker, its own (isolated, default) docker network, no dependency on the `Square`/`multitenant_admin`
-stack.
+broker, its own (isolated, default) docker network, no dependency on any other project's stack.
 
 It pulls prebuilt images (`treealarm/...:latest`) from Docker Hub, so it reflects whatever was
 last published with `scripts/push-images.sh` — no source checkouts are needed to *run* it.
@@ -41,9 +40,6 @@ change a password, and whoever wants to does it in the web UI.
 administrators of the web UI: new users, password resets, the administrator role. A new user, and
 one whose password was reset, sets their own password at the next sign-in. Non-administrators see
 only the cameras granted to them on the web UI's Permissions page.
-
-Square integration is **off by default**: the `SQUARE_*` vars are empty in `.env`, so nothing is
-pushed to Square.
 
 ## Before a real deployment
 
@@ -216,7 +212,7 @@ publish to the core's.
   machines need Consul (8301 TCP/UDP), the sidecars' internal ports and, with its MediaMTX, its API
   and WHEP (9997, 8889); browsers need web and, with its MediaMTX, 8189/UDP. With
   `network_mode: host` Docker publishes nothing itself, so ufw or nftables rules apply as written.
-- **Not yet in a distributed deployment**: the Square integration, the analytics worker and roitrc
+- **Not yet in a distributed deployment**: the analytics worker and roitrc
   (`ta_vms/docs/future_plans/`).
 
 ## Building and publishing images
