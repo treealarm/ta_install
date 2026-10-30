@@ -18,6 +18,17 @@
     "url": "https://get.enterprisedb.com/postgresql/postgresql-18.6-1-windows-x64-binaries.zip",
     "sha256": "fbe23da234ee31547bf8a36d29dfd81e82b849df2d2b78d2eecb43d360252f8c"
   },
+  // The PostGIS binaries are laid over the PostgreSQL directory (bin, lib, share\extension):
+  // CREATE EXTENSION postgis needs them, and the map database calls it. Built for PostgreSQL 18,
+  // the major the installer pins; a bundle for another major would load the wrong postgres.exe
+  // API and fail at first use.
+  "postgis": {
+    "version": "3.6.2",
+    "license": "GPL-2.0-or-later",
+    "licenseFile": "licenses\\PostGIS.txt",
+    "url": "https://download.osgeo.org/postgis/windows/pg18/postgis-bundle-pg18-3.6.2x64.zip",
+    "sha256": "0f41241cc536f7404dda43fd2a3f20ffe1fa1d71a8d4f6341428cd25931bf419"
+  },
   // The portable zip, not the NSIS installer: no Add/Remove entry of its own. The VC++
   // redistributable it carries is dropped: the one shipped comes with the ta_vms build, from the
   // toolset that compiled vms.exe, and is new enough for Erlang and PostgreSQL too.

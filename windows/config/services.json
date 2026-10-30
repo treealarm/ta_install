@@ -175,6 +175,9 @@
     // System-wide: on the core (or the one machine) only.
     { "appId": "vmscfg", "roles": ["standalone", "core"], "exe": "dotnet\\VmsCfg\\VmsCfg.exe", "protocol": "grpc", "appPort": "${CFG_VMS_PORT}",
       "daprHttpPort": 3601, "daprGrpcPort": 41002, "daprInternalGrpcPort": 19012, "metricsPort": 9191, "placement": false },
+    // The map: the tree, states, events and rights. Replicable, but the installer runs one copy.
+    { "appId": "vmsmap", "roles": ["standalone", "core"], "exe": "dotnet\\VmsMap\\VmsMap.exe", "protocol": "grpc", "appPort": "${MAP_VMS_PORT}",
+      "daprHttpPort": 3617, "daprGrpcPort": 41018, "daprInternalGrpcPort": 19028, "metricsPort": 9207, "placement": false },
     { "appId": "vmsutils", "roles": ["standalone", "core"], "exe": "dotnet\\VmsUtils\\VmsUtils.exe", "protocol": "grpc", "appPort": "${UTILS_VMS_PORT}",
       "daprHttpPort": 3606, "daprGrpcPort": 41007, "daprInternalGrpcPort": 19017, "metricsPort": 9196, "placement": false },
     // A node's own, and the core's as a node with the standalone app ids.

@@ -24,7 +24,7 @@ services:
     command: ["./placement", "-port", "50005"]
 
   postgres:
-    image: postgres:latest
+    image: postgis/postgis:latest
     logging: *logging
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-postgres}"
@@ -46,7 +46,7 @@ services:
   #   docker compose run --rm db-init            # create what is missing
   #   docker compose run --rm db-init --check    # report only, create nothing
   db-init:
-    image: postgres:latest
+    image: postgis/postgis:latest
     logging: *logging
     env_file:
       - .env
@@ -372,6 +372,47 @@ services:
     network_mode: "service:vmscfg"
     depends_on:
       - vmscfg
+
+  vmsmap:
+    image: treealarm/vmsmap:latest
+    logging: *logging
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      APP_ID: vmsmap
+    depends_on:
+      postgres:
+        condition: service_started
+      db-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  vmsmap-dapr:
+    image: "daprio/daprd:latest"
+    logging: *logging
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "vmsmap"
+      - "-app-port"
+      - "${MAP_VMS_PORT}"
+      - "-app-protocol"
+      - "grpc"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-dapr-listen-addresses"
+      - "127.0.0.1"
+      - "-components-path"
+      - "/components"
+    volumes:
+      - ./init_files/dapr_components:/components
+    network_mode: "service:vmsmap"
+    depends_on:
+      - vmsmap
 
   vmsonvif:
     image: treealarm/vmsonvif:latest

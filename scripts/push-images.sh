@@ -19,6 +19,7 @@ declare -a PAIRS=(
     "ta_vms-vmssingleton:latest    $NAMESPACE/vmssingleton:latest"
     "ta_vms-vmslogger:latest       $NAMESPACE/vmslogger:latest"
     "ta_vms-vmscfg:latest          $NAMESPACE/vmscfg:latest"
+    "ta_vms-vmsmap:latest          $NAMESPACE/vmsmap:latest"
     "ta_vms-vmsonvif:latest        $NAMESPACE/vmsonvif:latest"
     "ta_vms-vmsonvif-actors:latest $NAMESPACE/vmsonvif-actors:latest"
     "ta_vms-vmsfs:latest           $NAMESPACE/vmsfs:latest"

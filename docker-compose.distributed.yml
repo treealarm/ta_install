@@ -114,7 +114,7 @@ services:
   # distributed.sh insists on.
   postgres:
     <<: *core
-    image: postgres:latest
+    image: postgis/postgis:latest
     logging: *logging
     network_mode: host
     restart: unless-stopped
@@ -128,7 +128,7 @@ services:
 
   db-init:
     <<: *core
-    image: postgres:latest
+    image: postgis/postgis:latest
     logging: *logging
     network_mode: host
     env_file:
@@ -253,6 +253,25 @@ services:
               "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
               "-resources-path", "/dist/components", "-config", "/dist/dapr/vmscfg.yaml"]
     depends_on: [vmscfg, consul-server, dapr-sentry]
+
+  # The map is system-wide: the tree, states, events and rights belong to the deployment, not to
+  # one machine, so it runs on the core only. It is replicable; nothing here pins it to one.
+  vmsmap:
+    <<: [*core, *app]
+    image: treealarm/vmsmap:latest
+    environment: { APP_ID: vmsmap, DAPR_HTTP_PORT: "3617", DAPR_GRPC_PORT: "51018" }
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+  vmsmap-dapr:
+    <<: [*core, *sidecar]
+    environment: { <<: *sidecar-flags, DAPR_SENTRY_TOKEN_FILE: /dist/tokens/vmsmap.token }
+    command: ["./daprd", "-app-id", "vmsmap", "-app-port", "${MAP_VMS_PORT}", "-app-protocol", "grpc",
+              "-dapr-http-port", "3617", "-dapr-grpc-port", "51018", "-dapr-internal-grpc-port", "19028", "-metrics-port", "9207",
+              "-dapr-listen-addresses", "127.0.0.1", "-dapr-internal-grpc-listen-address", "${DAPR_HOST_IP}", "-metrics-listen-address", "127.0.0.1",
+              "-enable-mtls", "-sentry-address", "${CORE_ADDRESS}:${DAPR_SENTRY_PORT}",
+              "-resources-path", "/dist/components", "-config", "/dist/dapr/vmsmap.yaml"]
+    depends_on: [vmsmap, consul-server, dapr-sentry]
 
   vmsutils:
     <<: [*core, *app]

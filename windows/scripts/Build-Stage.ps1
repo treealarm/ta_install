@@ -116,6 +116,20 @@ Get-ChildItem (Join-Path $Stage 'pgsql') -Directory |
 Get-ChildItem (Join-Path $Stage 'pgsql') -Filter '*_3rd_party_licenses.txt' | Where-Object Name -notlike 'commandlinetools*' | Remove-Item
 Remove-Item (Join-Path $Stage 'pgsql\pgAdmin_license.txt') -ErrorAction SilentlyContinue
 
+# PostGIS, laid over that PostgreSQL directory: CREATE EXTENSION reads share\extension, and the
+# postgis-3.dll in lib needs the GEOS/PROJ libraries beside it in bin. Raster, topology and the
+# GDAL data are left out — the map stores geometry only.
+$postgis = Get-Component 'postgis'
+$postgisTmp = Join-Path $Cache ('x-' + [IO.Path]::GetRandomFileName())
+Expand-Archive $postgis -DestinationPath $postgisTmp
+$postgisRoot = Get-ChildItem $postgisTmp -Directory | Select-Object -First 1
+if (-not $postgisRoot) { throw 'the PostGIS bundle has no top-level directory' }
+Copy-Item (Join-Path $postgisRoot.FullName 'bin\*') (Join-Path $Stage 'pgsql\bin') -Force
+Copy-Item (Join-Path $postgisRoot.FullName 'lib\*') (Join-Path $Stage 'pgsql\lib') -Force
+Copy-Item (Join-Path $postgisRoot.FullName 'share\extension\*') (Join-Path $Stage 'pgsql\share\extension') -Force
+Copy-Item (Join-Path $postgisRoot.FullName 'bin\COPYING') (Join-Path $Stage 'licenses\PostGIS.txt') -Force
+Remove-Item $postgisTmp -Recurse -Force
+
 # Erlang, without its own VC++ redistributable (see versions.json), and RabbitMQ.
 Expand-Into (Get-Component 'erlang') (Join-Path $Stage 'erlang')
 Remove-Item (Join-Path $Stage 'erlang\doc'), (Join-Path $Stage 'erlang\vc_redist.exe') -Recurse -Force -ErrorAction SilentlyContinue
