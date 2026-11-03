@@ -757,3 +757,16 @@ services:
     network_mode: "service:web_vms"
     depends_on:
       - web_vms
+
+  # The demo world's cameras, off by default: `docker compose --profile demo up -d`. The flag in
+  # .env installs the world; without this profile the world is installed without cameras and says
+  # which ones it is missing. Host networking is what WS-Discovery needs to reach its cameras as it
+  # would on the LAN; the cameras are then added in the web from the search it finds.
+  onvifsim:
+    profiles: [demo]
+    image: ghcr.io/treealarm/onvifsim:latest
+    network_mode: host
+    logging: *logging
+    volumes:
+      - ./data/onvifsim:/data
+    restart: unless-stopped
