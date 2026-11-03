@@ -147,6 +147,24 @@ No camera is pre-configured. Open the web UI and add one the normal way (ONVIF d
 manual RTSP URL). To enable analytics on it: Admin → Analytics → add a watch (camera + stream +
 classes), then arm the camera.
 
+## Demo world
+
+A fresh installation shows an empty map. To look at the product with content, install the demo
+world "UMD Data Center": set `DEMO_CONFIG=umd-datacenter` in `.env` before `up` (VmsMap and VmsCfg
+install it at startup), or leave the flag empty and press **Install demo** at the foot of
+Admin → Maps. It is the same world either way, installing again is idempotent, and **Remove demo**
+takes away only what the demo wrote — your own maps and nodes are never touched.
+
+The world's cameras are OnvifSim's. The `demo` compose profile raises it, and is off by default:
+
+```bash
+docker compose --profile demo up -d
+```
+
+Without it the world still installs, without cameras, and the report names the ones it skipped;
+provision them and install the demo again. The map side is described in
+`ta_vms/docs/maps-and-plans.md`, "Demo configuration".
+
 ## Several machines: a core and nodes
 
 `docker-compose.yml` is one machine. To spread a deployment over several — a **core** with the
