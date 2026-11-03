@@ -66,7 +66,7 @@ public sealed class DistributedTests : IDisposable
   public void The_core_is_a_node_too_with_the_standalone_app_ids()
   {
     var config = _core.Load();
-    Assert.Equal(11, config.Manifest.Apps.Count);
+    Assert.Equal(12, config.Manifest.Apps.Count);
     Assert.Contains(config.Manifest.Apps, a => a.AppId == "vms");
     Assert.Equal("vms", config.App(App(config, "vmsonvif")).Env["OWN_SERVER_ID"]);
     Assert.Equal(CoreAddress, config.Env["VMS_MTX_HOST"]);

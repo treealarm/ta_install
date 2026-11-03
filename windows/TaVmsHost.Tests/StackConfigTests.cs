@@ -190,7 +190,7 @@ public sealed class StackConfigTests : IDisposable
   {
     var config = Load();
     Assert.Equal(
-      ["vmscfg", "vmsutils", "vmslogger", "vmsfs", "vmssingleton", "vmsonvif", "vmsonvif-actors",
+      ["vmscfg", "vmsmap", "vmsutils", "vmslogger", "vmsfs", "vmssingleton", "vmsonvif", "vmsonvif-actors",
        "vmsanalyticssingleton", "vmsptztrackingsingleton", "vms", "web-vms"],
       config.Manifest.Apps.Select(a => a.AppId));
     Assert.Equal("vms", config.App(config.Manifest.Apps.Single(a => a.AppId == "vmsonvif-actors")).Env["OWN_SERVER_ID"]);
@@ -226,6 +226,6 @@ public sealed class StackConfigTests : IDisposable
   public void Every_database_the_env_names_is_found()
   {
     var names = Infrastructure.DatabaseNames(Load().Env, NullLogger.Instance).Select(n => n.Name).ToList();
-    Assert.Equal(["ta_analytics", "ta_cfg", "ta_fs", "ta_keycloak", "ta_state"], names);
+    Assert.Equal(["ta_analytics", "ta_cfg", "ta_fs", "ta_keycloak", "ta_map", "ta_state"], names);
   }
 }
