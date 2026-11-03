@@ -4,8 +4,10 @@
 #
 # Its input is the ta_vms Windows build, the asset ta_vms-windows-x64.zip of the windows-build
 # prerelease in treealarm/ta_vms, which every push to ta_vms master replaces -- the way the compose
-# stack here runs whatever Docker Hub's :latest is. A new ta_vms build does not trigger this
-# workflow: run it by hand (Actions page, or `gh workflow run windows-installer.yml`).
+# stack here runs whatever Docker Hub's :latest is. Once the new asset is in place, ta_vms's windows
+# workflow sends this one a repository_dispatch event (ta_vms-windows-build), so a ta_vms build
+# brings the installer with it; it can still be run by hand (Actions page, or
+# `gh workflow run windows-installer.yml`).
 #
 # A vX.Y.Z tag also publishes the GitHub release of that version: this installer, once it has
 # passed the checks below, and the compose stack as a zip. The compose files in the zip are frozen at
@@ -22,6 +24,9 @@ on:
       - .env
       - init_files/config/mediamtx.yml
       - .github/workflows/windows-installer.yml
+  # Sent by ta_vms's windows workflow once it has replaced the asset above.
+  repository_dispatch:
+    types: [ta_vms-windows-build]
   workflow_dispatch:
 
 permissions:
@@ -398,8 +403,12 @@ jobs:
           $health | Format-Table ServiceName, Status
           $bad = @($health | Where-Object { $_.ServiceName -and $_.Status -ne 'passing' })
           if ($bad.Count -gt 0) { throw "unhealthy in Consul: $($bad.ServiceName -join ', ')" }
-          if (@($health | Where-Object ServiceName).Count -lt 11) { throw 'not every sidecar is registered in Consul' }
-          "ok   11 sidecars healthy in Consul"
+          # One sidecar per app in the manifest the installation shipped, whatever the number is
+          # now: a service added to ta_vms must not need this check edited.
+          $apps = (Get-Content 'C:\Program Files\TreeAlarm VMS\config\services.json' -Raw | ConvertFrom-Json).apps
+          $registered = @($health | Where-Object ServiceName).Count
+          if ($registered -lt $apps.Count) { throw "not every sidecar is registered in Consul: $registered of $($apps.Count)" }
+          "ok   $registered sidecars healthy in Consul"
           # Nothing of it on the LAN but what the firewall lets in: the sidecars' API stays local.
           $address = & $hostExe env DAPR_HOST_IP
           $client = New-Object Net.Sockets.TcpClient
