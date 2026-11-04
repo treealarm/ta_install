@@ -758,6 +758,28 @@ services:
     depends_on:
       - web_vms
 
+  # The demo world's world: the simulator must open Maryland, whose cameras stand where the demo
+  # placements put them, and not its own default village. This puts the world into the simulator's
+  # data directory and makes it the one it opens, before the simulator starts. The directory
+  # belongs to the demo profile alone, so a world edited in the simulator's editor is replaced at
+  # the next `up` — it is the scene, not data anybody keeps. The file is the one OnvifSim builds
+  # (data/worlds/maryland.json there; tests/onvifsim/world.py checks this copy against the demo).
+  onvifsim-world:
+    profiles: [demo]
+    image: alpine:latest
+    logging: *logging
+    volumes:
+      - ./init_files/onvifsim:/seed:ro
+      - ./data/onvifsim:/data
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /data/worlds
+        cp /seed/worlds/maryland.json /data/worlds/maryland.json
+        cp /seed/active-world.json /data/active-world.json
+    restart: "no"
+
   # The demo world's cameras, off by default: `docker compose --profile demo up -d`. The flag in
   # .env installs the world; without this profile the world is installed without cameras and says
   # which ones it is missing. Host networking is what WS-Discovery needs to reach its cameras as it
@@ -769,4 +791,7 @@ services:
     logging: *logging
     volumes:
       - ./data/onvifsim:/data
+    depends_on:
+      onvifsim-world:
+        condition: service_completed_successfully
     restart: unless-stopped
