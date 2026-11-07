@@ -165,6 +165,13 @@ Without it the world still installs, without cameras, and the report names the o
 provision them and install the demo again. The map side is described in
 `ta_vms/docs/maps-and-plans.md`, "Demo configuration".
 
+The world is the real campus — the first floor of Biomolecular Sciences and the roads round its
+block, drawn from OpenStreetMap — and the simulator draws a map of it under the ground. That picture
+is not shipped: on its first start OnvifSim fetches it from the tile provider into its own `/data`
+volume, so the machine needs internet **once**; without it the ground is drawn in its own colour and
+everything else works. Setting `ONVIFSIM_MAP_TILE_URL` on the `onvifsim` service points it at another
+provider.
+
 ## Several machines: a core and nodes
 
 `docker-compose.yml` is one machine. To spread a deployment over several — a **core** with the
