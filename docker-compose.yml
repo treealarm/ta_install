@@ -29,7 +29,12 @@ services:
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-postgres}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
-      POSTGRES_DB: "${POSTGRES_CFG_DB:-ta_cfg}"
+      # The database initdb creates for itself, not a service's. The postgis image installs its
+      # own extension into this one, filling `public` with spatial_ref_sys and friends; if it
+      # were a service's database, that service's baseline would meet those tables on a fresh
+      # volume and the migrator would refuse it as a pre-baseline schema. db-init creates every
+      # service database empty, and each service's baseline adds the extension it needs.
+      POSTGRES_DB: postgres
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     # No docker-entrypoint-initdb.d mount: that hook fires only when the data directory is
