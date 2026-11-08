@@ -216,6 +216,10 @@ services:
       - .env
     environment:
       APP_ID: vmsptztrackingsingleton
+    # The demo's cameras are configured at host.docker.internal, where the demo profile runs
+    # OnvifSim; a service that drives or streams them has to resolve that name.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Exactly one instance: a camera must have exactly one control loop, or two of them send the
     # motor opposing commands. See CLAUDE.md.
     volumes: *data-volume
@@ -337,6 +341,10 @@ services:
     environment:
       POSTGRES_HOST: postgres
       APP_ID: vmscfg
+      # The node the demo's cameras are pinned to, and the name a container reaches OnvifSim by;
+      # the demo profile runs that simulator on the host's network.
+      OWN_SERVER_ID: vms
+      DEMO_ONVIFSIM_HOST: host.docker.internal
     # Waits for db-init to finish, not just for postgres to be up: without its database this
     # service now fails fast with a message naming it instead of retrying forever, so starting
     # it early would turn a working installation into a crash loop.
@@ -643,6 +651,8 @@ services:
       - .env
     environment:
       APP_ID: vms
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes: *data-volume
     depends_on:
       - vmscfg
@@ -781,9 +791,9 @@ services:
     restart: "no"
 
   # The demo world's cameras, off by default: `docker compose --profile demo up -d`. The flag in
-  # .env installs the world; without this profile the world is installed without cameras and says
-  # which ones it is missing. Host networking is what WS-Discovery needs to reach its cameras as it
-  # would on the LAN; the cameras are then added in the web from the search it finds.
+  # .env installs the world, and the demo writes these cameras itself at DEMO_ONVIFSIM_HOST; without
+  # this profile the world is installed without cameras and says which ones it is missing. Host
+  # networking is what WS-Discovery needs to reach its cameras as it would on the LAN.
   onvifsim:
     profiles: [demo]
     image: ghcr.io/treealarm/onvifsim:latest
