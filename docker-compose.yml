@@ -29,7 +29,12 @@ services:
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-postgres}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
-      POSTGRES_DB: "${POSTGRES_CFG_DB:-ta_cfg}"
+      # The database initdb creates for itself, not a service's. The postgis image installs its
+      # own extension into this one, filling `public` with spatial_ref_sys and friends; if it
+      # were a service's database, that service's baseline would meet those tables on a fresh
+      # volume and the migrator would refuse it as a pre-baseline schema. db-init creates every
+      # service database empty, and each service's baseline adds the extension it needs.
+      POSTGRES_DB: postgres
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     # No docker-entrypoint-initdb.d mount: that hook fires only when the data directory is
@@ -337,6 +342,11 @@ services:
     environment:
       POSTGRES_HOST: postgres
       APP_ID: vmscfg
+      # The node the demo's cameras are pinned to, and the name a container reaches OnvifSim by:
+      # the demo profile runs that simulator as a service of this compose project, so every
+      # service resolves it through the project's own network.
+      OWN_SERVER_ID: vms
+      DEMO_ONVIFSIM_HOST: onvifsim
     # Waits for db-init to finish, not just for postgres to be up: without its database this
     # service now fails fast with a message naming it instead of retrying forever, so starting
     # it early would turn a working installation into a crash loop.
@@ -424,8 +434,6 @@ services:
       # The node whose camera subnet this instance shares. Must match the server_id side of
       # this node's MEDIA_SERVER_PAIRS entry: ONVIF only reaches a camera from its own node.
       OWN_SERVER_ID: vms
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes: *data-volume
     depends_on:
       - vmscfg
@@ -467,8 +475,6 @@ services:
       # The node whose camera subnet this instance shares. Must match the server_id side of
       # this node's MEDIA_SERVER_PAIRS entry: ONVIF only reaches a camera from its own node.
       OWN_SERVER_ID: vms
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes: *data-volume
     depends_on:
       - vmscfg
@@ -781,14 +787,26 @@ services:
     restart: "no"
 
   # The demo world's cameras, off by default: `docker compose --profile demo up -d`. The flag in
-  # .env installs the world; without this profile the world is installed without cameras and says
-  # which ones it is missing. Host networking is what WS-Discovery needs to reach its cameras as it
-  # would on the LAN; the cameras are then added in the web from the search it finds.
+  # .env installs the world, and the demo writes these cameras itself at DEMO_ONVIFSIM_HOST, which
+  # this profile makes the service name below — so every service of the project reaches the
+  # simulator the same way, without host networking (whose ports and addresses mean different
+  # things on Docker Desktop) and without touching the host's own ports. Only its editor and API
+  # are published, for an administrator to open.
   onvifsim:
     profiles: [demo]
     image: ghcr.io/treealarm/onvifsim:latest
-    network_mode: host
     logging: *logging
+    # The simulator's defaults are its own (ONVIF 8001…, RTSP 8554); the demo needs the addresses it
+    # writes into VmsCfg — DemoCameras.FirstOnvifPort, 8101…8105 — and an RTSP port of its own.
+    # Discovery is off because the cameras are added by address.
+    environment:
+      ONVIFSIM_ONVIF_BASE_PORT: "8101"
+      ONVIFSIM_RTSP_PORT: "8560"
+      ONVIFSIM_RTP_PORT: "6970"
+      ONVIFSIM_PORT: "8090"
+      ONVIFSIM_DISCOVERY_PORT: "0"
+    ports:
+      - "127.0.0.1:8090:8090"   # its editor and API, for looking at the world
     volumes:
       - ./data/onvifsim:/data
     depends_on:

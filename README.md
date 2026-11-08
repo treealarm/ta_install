@@ -151,9 +151,9 @@ classes), then arm the camera.
 
 A fresh installation shows an empty map. To look at the product with content, install the demo
 world "UMD Data Center": set `DEMO_CONFIG=umd-datacenter` in `.env` before `up` (VmsMap and VmsCfg
-install it at startup), or leave the flag empty and press **Install demo** at the foot of
-Admin → Maps. It is the same world either way, installing again is idempotent, and **Remove demo**
-takes away only what the demo wrote — your own maps and nodes are never touched.
+install it at startup), or leave the flag empty and press **Install demo** in the block at the foot
+of Admin → Deployment. It is the same world either way, installing again is idempotent, and
+**Remove demo** takes away only what the demo wrote — your own maps and nodes are never touched.
 
 The world's cameras are OnvifSim's. The `demo` compose profile raises it, and is off by default:
 
@@ -161,9 +161,21 @@ The world's cameras are OnvifSim's. The `demo` compose profile raises it, and is
 docker compose --profile demo up -d
 ```
 
+The profile runs the simulator as the compose service `onvifsim`, which is the address the demo
+writes into VmsCfg (`DEMO_ONVIFSIM_HOST`): ONVIF on 8101–8105 and RTSP on 8560 inside the project's
+network, so no host port is taken. Its own editor and API are published for an administrator at
+<http://localhost:8090>.
+
 Without it the world still installs, without cameras, and the report names the ones it skipped;
 provision them and install the demo again. The map side is described in
 `ta_vms/docs/maps-and-plans.md`, "Demo configuration".
+
+The world is the real campus — the first floor of Biomolecular Sciences and the roads round its
+block, drawn from OpenStreetMap — and the simulator draws a map of it under the ground. That picture
+is not shipped: on its first start OnvifSim fetches it from the tile provider into its own `/data`
+volume, so the machine needs internet **once**; without it the ground is drawn in its own colour and
+everything else works. Setting `ONVIFSIM_MAP_TILE_URL` on the `onvifsim` service points it at another
+provider.
 
 ## Several machines: a core and nodes
 
