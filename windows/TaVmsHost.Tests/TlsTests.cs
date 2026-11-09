@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 
 namespace TaVmsHost.Tests;
 
@@ -99,17 +100,44 @@ public sealed class TlsTests : IDisposable
     Directory.Delete(Path.Combine(_dir, "tls"), true);
     File.Delete(Path.Combine(_dir, "core", "tls-ca.key"));
 
-    Distributed.EnsureCoreTls(_core.Load(), TextWriter.Null);
+    Distributed.EnsureCoreFiles(_core.Load(), TextWriter.Null);
 
     using var leaf = X509Certificate2.CreateFromPem(Read("tls", "server.crt"), Read("tls", "server.key"));
     Assert.True(Chains(leaf));
+  }
+
+  // An app added to services.json since the core was made: `TaVmsHost core` is not run again, and
+  // without a token the supervisor refuses to start that sidecar. Installing a newer version runs
+  // `ensure` and that is where the token appears; one already there is left alone.
+  [Fact]
+  public void A_core_made_before_an_app_was_added_gets_its_token()
+  {
+    var config = _core.Load();
+    var token = config.TokenPath("vmsmap");
+    File.Delete(token);
+    var kept = Read(Path.Combine("tokens", "vms.token"));
+
+    Distributed.EnsureCoreFiles(config, TextWriter.Null);
+
+    Assert.True(File.Exists(token));
+    Assert.Equal(kept, Read(Path.Combine("tokens", "vms.token")));
+    Assert.Equal(Pki.AppSpiffeId("vmsmap"), TokenSubject(File.ReadAllText(token)));
+  }
+
+  // The claim Sentry reads: the app id's SPIFFE id, signed with the core's key.
+  private static string? TokenSubject(string token)
+  {
+    var payload = token.Split('.')[1].Replace('-', '+').Replace('_', '/');
+    payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+    return JsonSerializer.Deserialize<JsonElement>(Convert.FromBase64String(payload))
+      .GetProperty("sub").GetString();
   }
 
   [Fact]
   public void Only_a_core_makes_an_authority()
   {
     using var standalone = new Installation();
-    Assert.Throws<InvalidOperationException>(() => Distributed.EnsureCoreTls(standalone.Load(), TextWriter.Null));
+    Assert.Throws<InvalidOperationException>(() => Distributed.EnsureCoreFiles(standalone.Load(), TextWriter.Null));
   }
 
   // Whether the certificate chains to the core's authority as the only root trusted.

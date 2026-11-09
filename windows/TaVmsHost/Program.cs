@@ -18,6 +18,8 @@
 //   TaVmsHost join <package> <address> [--no-mediamtx]
 //                                      join it with a package made in the core's web; without
 //                                      MediaMTX the node's cameras publish to the core's
+//   TaVmsHost ensure                   on the core: bring its own files up to date with this
+//                                      version (Distributed.cs); the installer runs it every time
 //
 // The installation lives in the directory above this executable (<home>\host\TaVmsHost.exe); its
 // data in --data, %ProgramData%\TreeAlarm\VMS unless told otherwise.
@@ -61,8 +63,8 @@ switch (positional)
     return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: true, Console.Out));
   case ["join", var package, var address, "--no-mediamtx"]:
     return RunDistributed(home, data, c => Distributed.Join(c, Path.GetFullPath(package), RequireLocal(address), mediaMtx: false, Console.Out));
-  case ["tls"]:
-    return RunDistributed(home, data, c => Distributed.EnsureCoreTls(c, Console.Out));
+  case ["ensure"]:
+    return RunDistributed(home, data, c => Distributed.EnsureCoreFiles(c, Console.Out));
   case ["fingerprint"]:
     return RunDistributed(home, data, c => Console.WriteLine(Distributed.Fingerprint(c)));
   case ["send-ctrl-c", var pid] when OperatingSystem.IsWindows():
@@ -70,7 +72,7 @@ switch (positional)
     Native.SendCtrlC(int.Parse(pid, System.Globalization.CultureInfo.InvariantCulture));
     return 0;
   default:
-    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | join (<package> | --core <core[:port]> --name <node>) <address> [--no-mediamtx] | tls | fingerprint   [--data <dir>]");
+    Console.Error.WriteLine("usage: TaVmsHost [run] | status | restart <name> | check-db | env <KEY> | core <address> | join (<package> | --core <core[:port]> --name <node>) <address> [--no-mediamtx] | ensure | fingerprint   [--data <dir>]");
     return 2;
 }
 

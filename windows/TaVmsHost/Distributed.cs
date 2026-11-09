@@ -19,8 +19,10 @@ namespace TaVmsHost;
 //   TaVmsHost join <package> <address> [--no-mediamtx]
 //                                     on a node, with a package made in the core's web; without
 //                                     MediaMTX its cameras publish to the core's
-//   TaVmsHost tls                     on the core: its TLS certificate authority if it has none yet,
-//                                     and its own certificate when missing or about to end
+//   TaVmsHost ensure                  on the core, on every install and upgrade: its TLS certificate
+//                                     authority if it has none yet, its own certificate when missing
+//                                     or about to end, and a Sentry token for every app id the
+//                                     installation runs that has none
 //   TaVmsHost fingerprint             the fingerprint of that certificate authority
 //
 //   core\           root.key: the root's key, closed to the service account; jwt.key, which signs
@@ -72,9 +74,7 @@ internal static class Distributed
     WriteText(Path.Combine(dir, "sentry", "config.yaml"), SentryConfiguration(Pki.Jwks(signingKey)));
 
     // The core is a node too, with the standalone app ids.
-    foreach (var app in config.Services.ForRole(Role.Core, WithSuffix(config.Env, "")).Apps)
-      WriteText(config.TokenPath(app.AppId), Pki.Token(signingKey, Pki.AppSpiffeId(app.AppId), now));
-    WriteText(config.TokenPath("dapr-placement"), Pki.Token(signingKey, Pki.PlacementId, now));
+    EnsureTokens(config, signingKey, now, output);
 
     var consulKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     WriteText(config.ConsulConfigPath, ConsulConfiguration(consulKey));
@@ -104,19 +104,44 @@ internal static class Distributed
   }
 
   /// <summary>
-  /// On the core: the TLS certificate authority once, and the core's own certificate whenever it is
-  /// missing or about to end. A core made before it had a CA gets one here. Install-TaVms.ps1 runs it
-  /// on every install and upgrade of a core, as `distributed.sh up` does on Linux.
+  /// Brings the core's own files up to date with this version. The TLS certificate authority once,
+  /// and the core's own certificate whenever it is missing or about to end: a core made before it had
+  /// a CA gets one here. A Sentry token for every app id this installation runs: `TaVmsHost core`
+  /// mints them when the core is made, so an app added to services.json later -- VmsMap was -- leaves
+  /// a core made before it without a token, and the supervisor refuses to start that sidecar. A core
+  /// made before its web had TLS is the same case for site.env. Install-TaVms.ps1 runs this on every
+  /// install and upgrade of a core, as `distributed.sh up` does on Linux.
   /// </summary>
-  public static void EnsureCoreTls(StackConfig config, TextWriter output)
+  public static void EnsureCoreFiles(StackConfig config, TextWriter output)
   {
     if (config.Role != Role.Core)
       throw new InvalidOperationException($"this machine is a {config.Role.Name()}, not a core");
     var shared = ParseEnv(File.ReadAllText(Path.Combine(config.DistributedDir, "shared.env")), "shared.env");
     EnsureCoreTls(config.DistributedDir, shared["CORE_ADDRESS"], DateTimeOffset.UtcNow, output);
-    // A core made before its web had TLS: site.env was written without these, and `tls` -- which the
-    // installer runs on every install and upgrade -- is where its certificate appears.
+    // A core made before its web had TLS: site.env was written without these.
     SiteEnv.Set(StackConfig.SiteEnvPath(config.Data), TlsSiteEnv(config.DistributedDir));
+    EnsureTokens(config, File.ReadAllText(Path.Combine(config.DistributedDir, "core", "jwt.key")),
+      DateTimeOffset.UtcNow, output);
+  }
+
+  /// <summary>
+  /// A token for every sidecar this installation runs that has none; one already there is left as it
+  /// is, being valid for as long as the core's signing key. The core is a node too, with the
+  /// standalone app ids, and also runs Dapr placement.
+  /// </summary>
+  private static void EnsureTokens(StackConfig config, string signingKey, DateTimeOffset now, TextWriter output)
+  {
+    foreach (var app in config.Services.ForRole(Role.Core, WithSuffix(config.Env, "")).Apps)
+      EnsureToken(config.TokenPath(app.AppId), Pki.AppSpiffeId(app.AppId));
+    EnsureToken(config.TokenPath("dapr-placement"), Pki.PlacementId);
+
+    void EnsureToken(string path, string subject)
+    {
+      if (File.Exists(path))
+        return;
+      WriteText(path, Pki.Token(signingKey, subject, now));
+      output.WriteLine($"Sentry token for '{Path.GetFileNameWithoutExtension(path)}' issued");
+    }
   }
 
   /// <summary>
@@ -163,7 +188,7 @@ internal static class Distributed
     var path = Path.Combine(config.DistributedDir, "tls", "ca.crt");
     return File.Exists(path)
       ? Pki.Fingerprint(File.ReadAllText(path))
-      : throw new InvalidOperationException($"no {path}: on a core, 'TaVmsHost tls' makes it");
+      : throw new InvalidOperationException($"no {path}: on a core, 'TaVmsHost ensure' makes it");
   }
 
   /// <summary>

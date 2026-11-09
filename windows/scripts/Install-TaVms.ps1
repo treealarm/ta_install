@@ -178,12 +178,14 @@ function Initialize-Role {
   if ($TheRole -eq 'core' -and (Test-Path $signingKey)) {
     & icacls.exe $signingKey /grant "${SidLocalService}:(R)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "icacls $signingKey failed: $LASTEXITCODE" }
-    # The deployment's TLS certificate authority, which a core made before it had one gets now, and
-    # the core's own certificate, renewed when it is about to end: every install and upgrade of a core
-    # passes here, as every `distributed.sh up` does on Linux.
-    Invoke-Checked $hostExe @('tls', '--data', $DataDir)
-    # Its key, which VmsCfg issues the nodes' certificates with: opened to it by `tls` when made, and
-    # here for an authority made before it did.
+    # The core's own files brought up to date: the deployment's TLS certificate authority, which a
+    # core made before it had one gets now; its own certificate, renewed when it is about to end; and
+    # a Sentry token for every app id this version runs -- one added to services.json since the core
+    # was made, VmsMap was, has none until here. Every install and upgrade of a core passes here, as
+    # every `distributed.sh up` does on Linux.
+    Invoke-Checked $hostExe @('ensure', '--data', $DataDir)
+    # Its key, which VmsCfg issues the nodes' certificates with: opened to it by `ensure` when made,
+    # and here for an authority made before it did.
     $tlsKey = Join-Path $dist 'core\tls-ca.key'
     & icacls.exe $tlsKey /grant "${SidLocalService}:(R)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "icacls $tlsKey failed: $LASTEXITCODE" }

@@ -125,7 +125,10 @@ other change of role takes an uninstall first. An upgrade keeps the role.
 - **Not yet across machines**: analytics workers (there are none on Windows anyway).
 
 `TaVmsHost core <address>` and `join (<package> | --core <core> --name <node>) <address>` are what
-the installer runs; they keep their files in `C:\ProgramData\TreeAlarm\VMS\distributed` (the
+the installer runs, together with `ensure` on every install and upgrade of a core — it brings the
+core's own files up to date with the version being installed: the TLS certificate, and a Sentry token
+for an app that version runs and the core has none for. They keep their files in
+`C:\ProgramData\TreeAlarm\VMS\distributed` (the
 root's key readable by administrators only; the key that signs tokens by the services too, since
 VmsCfg signs the tokens of the nodes that join), laid out as `data/distributed` is on Linux.
 

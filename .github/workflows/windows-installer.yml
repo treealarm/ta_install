@@ -332,6 +332,120 @@ jobs:
           path: ${{ runner.temp }}/logs
           retention-days: 14
 
+  # A core made by the release and upgraded by this build: it keeps its data and its trust, and gains
+  # what the new version needs. `upgrade` covers a standalone, which has neither Sentry tokens nor a
+  # web certificate. A core lags services.json, and an app added since it was made -- VmsMap was --
+  # has no token until the upgrade issues one; a core made before its web had TLS has none in
+  # site.env until the same step writes them.
+  core-upgrade:
+    needs: installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ta_vms-setup-x64
+          path: ${{ runner.temp }}/new
+
+      - name: Install the latest release as the core
+        timeout-minutes: 20
+        run: |
+          $address = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -in 'Dhcp', 'Manual' -and $_.IPAddress -notlike '169.254.*' } |
+            Select-Object -First 1).IPAddress
+          if (-not $address) { throw 'no IPv4 address on the runner' }
+          "core at $address"
+          $tag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
+          if ($LASTEXITCODE -ne 0) { throw 'no release to upgrade from' }
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern ta_vms-setup-x64.exe --dir "$env:RUNNER_TEMP\old"
+          if ($LASTEXITCODE -ne 0) { throw "cannot download the installer of $tag" }
+          # Every release since 0.1.6 is a WiX bundle; an older Inno Setup one knew no roles.
+          $setup = Start-Process "$env:RUNNER_TEMP\old\ta_vms-setup-x64.exe" -PassThru `
+            -ArgumentList '/quiet', '/norestart', '/log', "$env:RUNNER_TEMP\old-setup.log", 'Role=core', "Address=$address"
+          $null = $setup.Handle
+          $setup.WaitForExit()
+          if ($setup.ExitCode -ne 0) { throw "$tag setup exited with $($setup.ExitCode)" }
+          $hostExe = 'C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe'
+          if ((& $hostExe env TAVMS_ROLE) -ne 'core') { throw 'the release did not make a core' }
+          Copy-Item 'C:\ProgramData\TreeAlarm\VMS\config\site.env' "$env:RUNNER_TEMP\site.env.before"
+
+      - name: Upgrade the core
+        timeout-minutes: 20
+        run: |
+          $setup = Start-Process "$env:RUNNER_TEMP\new\ta_vms-setup-x64.exe" -PassThru `
+            -ArgumentList '/quiet', '/norestart', '/log', "$env:RUNNER_TEMP\setup.log"
+          $null = $setup.Handle
+          $setup.WaitForExit()
+          if ($setup.ExitCode -ne 0) { throw "the upgrade exited with $($setup.ExitCode)" }
+          $services = Get-Service TaVmsHost, TaVms.Postgres, TaVms.RabbitMQ
+          $services | Format-Table Name, Status
+          if ($services | Where-Object Status -ne 'Running') { throw 'a service is not running after the upgrade' }
+
+          $hostExe = 'C:\Program Files\TreeAlarm VMS\host\TaVmsHost.exe'
+          $siteEnv = 'C:\ProgramData\TreeAlarm\VMS\config\site.env'
+          $before = Get-Content "$env:RUNNER_TEMP\site.env.before"
+          $after = @(Get-Content $siteEnv | Where-Object { $_ -notmatch '^WEB_VMS_TLS_' })
+          if (Compare-Object $before $after) { throw 'the upgrade changed site.env beyond the TLS certificate' }
+          foreach ($key in 'WEB_VMS_TLS_CERT', 'WEB_VMS_TLS_KEY') {
+            $value = & $hostExe env $key
+            if (-not $value -or -not (Test-Path $value)) { throw "site.env names no usable $key ($value)" }
+          }
+          "ok   site.env kept, and names the web's certificate"
+
+          # The app added to services.json since the release: without its token the supervisor stops
+          # ("No Sentry token for app id"), which is how an upgraded core failed before `ensure`.
+          if (-not (Test-Path 'C:\ProgramData\TreeAlarm\VMS\distributed\tokens\vmsmap.token')) {
+            throw 'no Sentry token for vmsmap after the upgrade'
+          }
+          "ok   the token of an app added since the release"
+
+          # The old data is there: Keycloak's realm and admin/admin.
+          $port = & $hostExe env WEB_VMS_PORT
+          $deadline = (Get-Date).AddMinutes(5)
+          $token = $null
+          while (-not $token -and (Get-Date) -lt $deadline) {
+            try {
+              $token = (Invoke-RestMethod "http://localhost:$port/api/auth/login" -Method Post -ContentType 'application/json' `
+                -Body '{"username":"admin","password":"admin"}' -TimeoutSec 10).access_token
+            } catch { Start-Sleep -Seconds 5 }
+          }
+          & $hostExe status
+          if (-not $token) { throw 'no login as admin/admin within 5 minutes of the upgrade' }
+          "ok   login after the upgrade, against the old database"
+
+          # The web presents a certificate for this machine's address under the core's own authority,
+          # which it offers for download; plain HTTP stays on the loopback.
+          $address = & $hostExe env DAPR_HOST_IP
+          $ca = Join-Path $env:RUNNER_TEMP 'ca.crt'
+          Invoke-WebRequest "http://127.0.0.1:$port/api/deployment/ca.crt" -OutFile $ca
+          curl.exe --silent --show-error --ssl-no-revoke --cacert $ca "https://${address}:$port/api/deployment" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "HTTPS on ${address} is not trusted by the core's authority" }
+          curl.exe --silent --ssl-no-revoke "https://${address}:$port/api/deployment" | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "HTTPS on ${address} answers without the core's authority" }
+          curl.exe --silent "http://${address}:$port/api/deployment" | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "plain HTTP answers on ${address}" }
+          "ok   HTTPS on $address under the core's own authority"
+
+      - name: Collect logs
+        if: ${{ always() }}
+        run: |
+          $out = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'logs')
+          Copy-Item "$env:RUNNER_TEMP\*.log" $out -ErrorAction SilentlyContinue
+          foreach ($d in 'install-logs', 'host-logs', 'logs') {
+            $src = "C:\ProgramData\TreeAlarm\VMS\$d"
+            if (Test-Path $src) { Copy-Item $src (Join-Path $out $d) -Recurse }
+          }
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: core-upgrade-logs
+          path: ${{ runner.temp }}/logs
+          retention-days: 14
+
   # A core of a deployment over several machines, on one runner: Consul's server, Sentry and
   # placement with TLS, every sidecar resolving through Consul with a certificate Sentry signed.
   # The calls below cross sidecars as in the smoke test, so a 200 means all of that works. A node
@@ -414,6 +528,24 @@ jobs:
           $client = New-Object Net.Sockets.TcpClient
           try { $client.Connect($address, 3600); throw "web-vms's sidecar API answers on $address" } catch [Net.Sockets.SocketException] { "ok   sidecar API not on $address" } finally { $client.Dispose() }
 
+          # The web presents a certificate for this machine's address under the core's own authority,
+          # which it offers for download; plain HTTP stays on the loopback.
+          $port = & $hostExe env WEB_VMS_PORT
+          foreach ($key in 'WEB_VMS_TLS_CERT', 'WEB_VMS_TLS_KEY') {
+            $value = & $hostExe env $key
+            if (-not $value -or -not (Test-Path $value)) { throw "site.env names no usable $key ($value)" }
+          }
+          $ca = Join-Path $env:RUNNER_TEMP 'ca.crt'
+          Invoke-WebRequest "http://127.0.0.1:$port/api/deployment/ca.crt" -OutFile $ca
+          # Schannel, as everything here: an authority without a CRL needs --ssl-no-revoke.
+          curl.exe --silent --show-error --ssl-no-revoke --cacert $ca "https://${address}:$port/api/deployment" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "HTTPS on ${address} is not trusted by the core's authority" }
+          curl.exe --silent --ssl-no-revoke "https://${address}:$port/api/deployment" | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "HTTPS on ${address} answers without the core's authority" }
+          curl.exe --silent "http://${address}:$port/api/deployment" | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "plain HTTP answers on ${address}" }
+          "ok   HTTPS on $address under the core's own authority"
+
           # A node joins by asking the core's web, anonymously while enrollment is open.
           $join = @{ name = 'ci'; address = '10.0.0.2'; mediaMtx = $true } | ConvertTo-Json
           $deployment = Invoke-RestMethod "$base/api/deployment"
@@ -470,7 +602,7 @@ jobs:
           retention-days: 14
 
   release:
-    needs: [installer, upgrade, core]
+    needs: [installer, upgrade, core, core-upgrade]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
