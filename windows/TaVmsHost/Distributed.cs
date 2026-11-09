@@ -93,6 +93,8 @@ internal static class Distributed
       ("VMS_MTX_HOST", ip),
       // Keycloak listens on this address (services.json), where every machine's web logs users in.
       ("KEYCLOAK_URL", KeycloakUrl(ip, config.Require("KEYCLOAK_PORT"))),
+      // What the web presents on the LAN. EnsureCoreTls above has written both by now.
+      ..TlsSiteEnv(dir),
     ]);
     // A MediaMTX row a standalone installation seeded at 127.0.0.1 is moved to VMS_MTX_HOST by
     // VmsCfg itself, on its next start.
@@ -112,7 +114,20 @@ internal static class Distributed
       throw new InvalidOperationException($"this machine is a {config.Role.Name()}, not a core");
     var shared = ParseEnv(File.ReadAllText(Path.Combine(config.DistributedDir, "shared.env")), "shared.env");
     EnsureCoreTls(config.DistributedDir, shared["CORE_ADDRESS"], DateTimeOffset.UtcNow, output);
+    // A core made before its web had TLS: site.env was written without these, and `tls` -- which the
+    // installer runs on every install and upgrade -- is where its certificate appears.
+    SiteEnv.Set(StackConfig.SiteEnvPath(config.Data), TlsSiteEnv(config.DistributedDir));
   }
+
+  /// <summary>
+  /// What the web presents on the LAN (web_srv's TlsEndpoint); plain HTTP stays on the loopback. The
+  /// certificate sits beside the other distributed files.
+  /// </summary>
+  private static (string Key, string Value)[] TlsSiteEnv(string dir) =>
+  [
+    ("WEB_VMS_TLS_CERT", Path.Combine(dir, "tls", "server.crt")),
+    ("WEB_VMS_TLS_KEY", Path.Combine(dir, "tls", "server.key")),
+  ];
 
   internal static void EnsureCoreTls(string dir, string address, DateTimeOffset now, TextWriter output)
   {
@@ -221,7 +236,7 @@ internal static class Distributed
       WriteText(Path.Combine(dir, file.Replace('/', Path.DirectorySeparatorChar)), content);
     WriteText(config.ConsulConfigPath, ConsulConfiguration(shared["CONSUL_ENCRYPT"]));
 
-    SiteEnv.Set(StackConfig.SiteEnvPath(config.Data),
+    List<(string Key, string Value)> site =
     [
       ("TAVMS_ROLE", Role.Node.Name()),
       ("TAVMS_NODE_NAME", name),
@@ -237,7 +252,13 @@ internal static class Distributed
       ("MT_ADMIN_PORT", ""),
       // services.json "when" of mediamtx.
       ("TAVMS_MEDIAMTX", mediaMtx ? "1" : "0"),
-    ]);
+    ];
+    // What the web presents on the LAN (web_srv's TlsEndpoint). A package from a core made before it
+    // had a certificate authority carries none: the web then listens on plain HTTP on every address,
+    // as a standalone installation does.
+    if (files.ContainsKey("tls/server.crt") && files.ContainsKey("tls/server.key"))
+      site.AddRange(TlsSiteEnv(dir));
+    SiteEnv.Set(StackConfig.SiteEnvPath(config.Data), site);
     output.WriteLine($"This machine is node '{name}' of the core at {shared["CORE_ADDRESS"]}: {dir}");
     output.WriteLine($"Its cameras are added in the web interface with server vms-{name}.");
   }
