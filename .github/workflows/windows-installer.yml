@@ -420,12 +420,25 @@ jobs:
           $address = & $hostExe env DAPR_HOST_IP
           $ca = Join-Path $env:RUNNER_TEMP 'ca.crt'
           Invoke-WebRequest "http://127.0.0.1:$port/api/deployment/ca.crt" -OutFile $ca
-          curl.exe --silent --show-error --ssl-no-revoke --cacert $ca "https://${address}:$port/api/deployment" | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "HTTPS on ${address} is not trusted by the core's authority" }
-          curl.exe --silent --ssl-no-revoke "https://${address}:$port/api/deployment" | Out-Null
-          if ($LASTEXITCODE -eq 0) { throw "HTTPS on ${address} answers without the core's authority" }
-          curl.exe --silent "http://${address}:$port/api/deployment" | Out-Null
-          if ($LASTEXITCODE -eq 0) { throw "plain HTTP answers on ${address}" }
+          # curl on Windows goes through Schannel, which takes no --cacert for a root the Windows
+          # store does not hold; the presented certificate is chained here instead.
+          $tcp = [System.Net.Sockets.TcpClient]::new($address, [int]$port)
+          $ssl = [System.Net.Security.SslStream]::new($tcp.GetStream(), $false, { param($a, $b, $c, $d) $true })
+          $ssl.AuthenticateAsClient($address)
+          $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
+          $ssl.Dispose(); $tcp.Dispose()
+          $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+          $chain.ChainPolicy.TrustMode = 'CustomRootTrust'
+          $chain.ChainPolicy.CustomTrustStore.Add(
+            [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile($ca))
+          $chain.ChainPolicy.RevocationMode = 'NoCheck'
+          if (-not $chain.Build($leaf)) { throw "the certificate on ${address} is not one of the core's authority" }
+          $trusted = $true
+          try { Invoke-WebRequest "https://${address}:$port/api/deployment" -TimeoutSec 10 | Out-Null } catch { $trusted = $false }
+          if ($trusted) { throw "HTTPS on ${address} is trusted without the core's authority" }
+          $plain = $true
+          try { Invoke-WebRequest "http://${address}:$port/api/deployment" -TimeoutSec 10 | Out-Null } catch { $plain = $false }
+          if ($plain) { throw "plain HTTP answers on ${address}" }
           "ok   HTTPS on $address under the core's own authority"
 
       - name: Collect logs
@@ -537,13 +550,25 @@ jobs:
           }
           $ca = Join-Path $env:RUNNER_TEMP 'ca.crt'
           Invoke-WebRequest "http://127.0.0.1:$port/api/deployment/ca.crt" -OutFile $ca
-          # Schannel, as everything here: an authority without a CRL needs --ssl-no-revoke.
-          curl.exe --silent --show-error --ssl-no-revoke --cacert $ca "https://${address}:$port/api/deployment" | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "HTTPS on ${address} is not trusted by the core's authority" }
-          curl.exe --silent --ssl-no-revoke "https://${address}:$port/api/deployment" | Out-Null
-          if ($LASTEXITCODE -eq 0) { throw "HTTPS on ${address} answers without the core's authority" }
-          curl.exe --silent "http://${address}:$port/api/deployment" | Out-Null
-          if ($LASTEXITCODE -eq 0) { throw "plain HTTP answers on ${address}" }
+          # curl on Windows goes through Schannel, which takes no --cacert for a root the Windows
+          # store does not hold; the presented certificate is chained here instead.
+          $tcp = [System.Net.Sockets.TcpClient]::new($address, [int]$port)
+          $ssl = [System.Net.Security.SslStream]::new($tcp.GetStream(), $false, { param($a, $b, $c, $d) $true })
+          $ssl.AuthenticateAsClient($address)
+          $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
+          $ssl.Dispose(); $tcp.Dispose()
+          $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+          $chain.ChainPolicy.TrustMode = 'CustomRootTrust'
+          $chain.ChainPolicy.CustomTrustStore.Add(
+            [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile($ca))
+          $chain.ChainPolicy.RevocationMode = 'NoCheck'
+          if (-not $chain.Build($leaf)) { throw "the certificate on ${address} is not one of the core's authority" }
+          $trusted = $true
+          try { Invoke-WebRequest "https://${address}:$port/api/deployment" -TimeoutSec 10 | Out-Null } catch { $trusted = $false }
+          if ($trusted) { throw "HTTPS on ${address} is trusted without the core's authority" }
+          $plain = $true
+          try { Invoke-WebRequest "http://${address}:$port/api/deployment" -TimeoutSec 10 | Out-Null } catch { $plain = $false }
+          if ($plain) { throw "plain HTTP answers on ${address}" }
           "ok   HTTPS on $address under the core's own authority"
 
           # A node joins by asking the core's web, anonymously while enrollment is open.
