@@ -23,11 +23,11 @@
   // the major the installer pins; a bundle for another major would load the wrong postgres.exe
   // API and fail at first use.
   "postgis": {
-    "version": "3.6.2",
+    "version": "3.7.0",
     "license": "GPL-2.0-or-later",
     "licenseFile": "licenses\\PostGIS.txt",
-    "url": "https://download.osgeo.org/postgis/windows/pg18/postgis-bundle-pg18-3.6.2x64.zip",
-    "sha256": "0f41241cc536f7404dda43fd2a3f20ffe1fa1d71a8d4f6341428cd25931bf419"
+    "url": "https://download.osgeo.org/postgis/windows/pg18/postgis-bundle-pg18-3.7.0x64.zip",
+    "sha256": "fa3db8060d8d376e869d961659bf4eff326c0d99a731396701af61a13dc12a40"
   },
   // The portable zip, not the NSIS installer: no Add/Remove entry of its own. The VC++
   // redistributable it carries is dropped: the one shipped comes with the ta_vms build, from the
