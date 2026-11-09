@@ -118,15 +118,23 @@ Remove-Item (Join-Path $Stage 'pgsql\pgAdmin_license.txt') -ErrorAction Silently
 
 # PostGIS, laid over that PostgreSQL directory: CREATE EXTENSION reads share\extension, and the
 # postgis-3.dll in lib needs the GEOS/PROJ libraries beside it in bin. Raster, topology and the
-# GDAL data are left out — the map stores geometry only. The bundle's bin\postgisgui never gets
-# there: Copy-Item copies a directory matched by a wildcard without its contents, and only files
-# are wanted from bin\ anyway.
+# GDAL data are left out — the map stores geometry only — and so is bin\postgisgui, a desktop
+# import tool no server runs.
 $postgis = Get-Component 'postgis'
 $postgisTmp = Join-Path $Cache ('x-' + [IO.Path]::GetRandomFileName())
 Expand-Archive $postgis -DestinationPath $postgisTmp
 $postgisRoot = Get-ChildItem $postgisTmp -Directory | Select-Object -First 1
 if (-not $postgisRoot) { throw 'the PostGIS bundle has no top-level directory' }
-Copy-Item (Join-Path $postgisRoot.FullName 'bin\*') (Join-Path $Stage 'pgsql\bin') -Force
+# Only what PostgreSQL lacks. The bundle also carries its own zlib, lz4, zstd, libiconv and an
+# OpenSSL from 2022 (3.0.7) where PostgreSQL 18.6 ships 3.5.7, and PostgreSQL's own modules are
+# linked against what it shipped: pgcrypto.dll imports EVP_MD_CTX_get_size_ex, which 3.0.7 does not
+# export, so overwriting the DLL made CREATE EXTENSION pgcrypto fail — and with it the first start
+# of every service that migrates a fresh database (VmsCfg, VmsFs). PostGIS's DLLs are newer-ABI
+# compatible with 3.5.7, so the direction that keeps PostgreSQL's copy is the safe one. -File also
+# leaves the bundle's bin\postgisgui out, a desktop tool no server runs.
+Get-ChildItem (Join-Path $postgisRoot.FullName 'bin') -File |
+  Where-Object { -not (Test-Path (Join-Path $Stage "pgsql\bin\$($_.Name)")) } |
+  Copy-Item -Destination (Join-Path $Stage 'pgsql\bin')
 Copy-Item (Join-Path $postgisRoot.FullName 'lib\*') (Join-Path $Stage 'pgsql\lib') -Force
 Copy-Item (Join-Path $postgisRoot.FullName 'share\extension\*') (Join-Path $Stage 'pgsql\share\extension') -Force
 Copy-Item (Join-Path $postgisRoot.FullName 'bin\COPYING') (Join-Path $Stage 'licenses\PostGIS.txt') -Force
