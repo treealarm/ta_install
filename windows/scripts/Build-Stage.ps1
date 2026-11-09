@@ -118,9 +118,9 @@ Remove-Item (Join-Path $Stage 'pgsql\pgAdmin_license.txt') -ErrorAction Silently
 
 # PostGIS, laid over that PostgreSQL directory: CREATE EXTENSION reads share\extension, and the
 # postgis-3.dll in lib needs the GEOS/PROJ libraries beside it in bin. Raster, topology and the
-# GDAL data are left out — the map stores geometry only. So is the bundle's bin\postgisgui, a
-# desktop import tool of 55 MB that nothing on a server runs (3.7.0's archive carries it, and
-# with it staged pgsql went over its ceiling below).
+# GDAL data are left out — the map stores geometry only. The bundle's bin\postgisgui never gets
+# there: Copy-Item copies a directory matched by a wildcard without its contents, and only files
+# are wanted from bin\ anyway.
 $postgis = Get-Component 'postgis'
 $postgisTmp = Join-Path $Cache ('x-' + [IO.Path]::GetRandomFileName())
 Expand-Archive $postgis -DestinationPath $postgisTmp
@@ -130,8 +130,6 @@ Copy-Item (Join-Path $postgisRoot.FullName 'bin\*') (Join-Path $Stage 'pgsql\bin
 Copy-Item (Join-Path $postgisRoot.FullName 'lib\*') (Join-Path $Stage 'pgsql\lib') -Force
 Copy-Item (Join-Path $postgisRoot.FullName 'share\extension\*') (Join-Path $Stage 'pgsql\share\extension') -Force
 Copy-Item (Join-Path $postgisRoot.FullName 'bin\COPYING') (Join-Path $Stage 'licenses\PostGIS.txt') -Force
-# The GUI came with bin\* above, and it is a directory rather than a file.
-Remove-Item (Join-Path $Stage 'pgsql\bin\postgisgui') -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $postgisTmp -Recurse -Force
 
 # Erlang, without its own VC++ redistributable (see versions.json), and RabbitMQ.
@@ -227,7 +225,9 @@ Set-Content -Path (Join-Path $Stage 'THIRD-PARTY-NOTICES.txt') -Value $notices -
 
 # Per component, and with a ceiling for the two whose archives carry far more than a server needs:
 # a renamed directory in a new upstream archive must fail the build, not ship another 700 MB.
-$ceilingMb = @{ pgsql = 300; erlang = 250 }
+# pgsql is 141 MB of pruned PostgreSQL and 183 MB of PostGIS binaries laid over it (3.7.0); the
+# ceiling sits above that pair and well below the 680 MB of pgAdmin that a rename would drag in.
+$ceilingMb = @{ pgsql = 350; erlang = 250 }
 foreach ($dir in Get-ChildItem $Stage -Directory) {
   $files = Get-ChildItem $dir.FullName -Recurse -File
   $mb = ($files | Measure-Object Length -Sum).Sum / 1MB
