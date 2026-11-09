@@ -230,6 +230,11 @@ publish to the core's.
 - **Sidecars talk over mutual TLS**, with certificates from Dapr Sentry on the core. Sentry signs a
   certificate for an app id only against a token for it, signed with the core's key; a node gets
   tokens for its own app ids only, in its package.
+- **Every machine's web speaks HTTPS on the machine's address**, and plain HTTP on the loopback, with
+  a certificate for that address issued by the core's own authority (a node gets its in the
+  package). The authority is offered for download at `GET /api/deployment/ca.crt`, with its
+  fingerprint in Administration → Deployment: a browser elsewhere trusts it once. A core or node old
+  enough to have no authority keeps its web on plain HTTP.
 - **The package is a credential**: it holds the node's tokens, the core's shared values (the
   credentials, ports and addresses of its PostgreSQL, RabbitMQ, MediaMTX and Keycloak, and the key
   every web seals live-video sessions with) and Consul's gossip key. It crosses the network from the

@@ -185,8 +185,16 @@ issue_server_cert() {
   cat "$DIST/tls/ca.crt" >> "$dir/server.crt"
 }
 
+# Where the web finds this machine's certificate inside its container, as distributed.env gives it
+# (write_machine_env).
+tls_env_lines() {
+  printf '%s\n' "WEB_VMS_TLS_CERT=/data/distributed/tls/server.crt" \
+    "WEB_VMS_TLS_KEY=/data/distributed/tls/server.key"
+}
+
 # On the core: the CA once, and the core's own certificate whenever it is missing or about to end. A
-# core made before it had a CA gets one here, on its next `up`.
+# core made before it had a CA gets one here, on its next `up` -- and, with it, the two variables its
+# web reads: distributed.env was written before there was a certificate to name.
 ensure_core_tls() {
   local address
   address=$(sed -n 's/^CORE_ADDRESS=//p' "$DIST/shared.env")
@@ -199,6 +207,9 @@ ensure_core_tls() {
       echo "TLS certificate for $address issued, valid for $TLS_SERVER_DAYS days"
     fi
   )
+  if ! grep -q '^WEB_VMS_TLS_CERT=' "$DIST/distributed.env" 2>/dev/null; then
+    tls_env_lines >> "$DIST/distributed.env"
+  fi
 }
 
 # What a machine joining checks the core against, as browsers show it: SHA-256 of the CA, in hex pairs.
@@ -295,6 +306,11 @@ write_machine_env() {
     echo "TAVMS_GID=$(id -g)"
     echo "TAVMS_NODE_NAME=$node"
     echo "DAPR_HOST_IP=$address"
+    # The web presents this machine's certificate on the LAN and keeps plain HTTP on the loopback
+    # (web_srv's TlsEndpoint). A core always has one: `up` ensures it before compose starts, and the
+    # container reads $DIST under /data. A node has one only when its package carried it -- a package
+    # from a core made before it had an authority carries none, and its web listens on plain HTTP.
+    if [[ $role == core || -f "$DIST/tls/server.crt" ]]; then tls_env_lines; fi
     echo "MEDIA_SERVER_PAIRS=$pairs"
     # Whether this machine runs MediaMTX: always on the core; a node's, unless --no-mediamtx
     # (`up` adds the profile node-mediamtx).
