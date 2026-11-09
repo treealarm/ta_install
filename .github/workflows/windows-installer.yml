@@ -429,8 +429,10 @@ jobs:
           $ssl.Dispose(); $tcp.Dispose()
           $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
           $chain.ChainPolicy.TrustMode = 'CustomRootTrust'
-          $chain.ChainPolicy.CustomTrustStore.Add(
-            [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile($ca))
+          # CreateFromPemFile wants a certificate and its key in one file; this is a certificate only.
+          $authority = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+          $authority.ImportFromPem([System.IO.File]::ReadAllText($ca))
+          $chain.ChainPolicy.CustomTrustStore.Add($authority[0])
           $chain.ChainPolicy.RevocationMode = 'NoCheck'
           if (-not $chain.Build($leaf)) { throw "the certificate on ${address} is not one of the core's authority" }
           $trusted = $true
@@ -559,8 +561,10 @@ jobs:
           $ssl.Dispose(); $tcp.Dispose()
           $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
           $chain.ChainPolicy.TrustMode = 'CustomRootTrust'
-          $chain.ChainPolicy.CustomTrustStore.Add(
-            [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile($ca))
+          # CreateFromPemFile wants a certificate and its key in one file; this is a certificate only.
+          $authority = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+          $authority.ImportFromPem([System.IO.File]::ReadAllText($ca))
+          $chain.ChainPolicy.CustomTrustStore.Add($authority[0])
           $chain.ChainPolicy.RevocationMode = 'NoCheck'
           if (-not $chain.Build($leaf)) { throw "the certificate on ${address} is not one of the core's authority" }
           $trusted = $true
