@@ -118,7 +118,9 @@ Remove-Item (Join-Path $Stage 'pgsql\pgAdmin_license.txt') -ErrorAction Silently
 
 # PostGIS, laid over that PostgreSQL directory: CREATE EXTENSION reads share\extension, and the
 # postgis-3.dll in lib needs the GEOS/PROJ libraries beside it in bin. Raster, topology and the
-# GDAL data are left out — the map stores geometry only.
+# GDAL data are left out — the map stores geometry only. So is the bundle's bin\postgisgui, a
+# desktop import tool of 55 MB that nothing on a server runs (3.7.0's archive carries it, and
+# with it staged pgsql went over its ceiling below).
 $postgis = Get-Component 'postgis'
 $postgisTmp = Join-Path $Cache ('x-' + [IO.Path]::GetRandomFileName())
 Expand-Archive $postgis -DestinationPath $postgisTmp
@@ -128,6 +130,8 @@ Copy-Item (Join-Path $postgisRoot.FullName 'bin\*') (Join-Path $Stage 'pgsql\bin
 Copy-Item (Join-Path $postgisRoot.FullName 'lib\*') (Join-Path $Stage 'pgsql\lib') -Force
 Copy-Item (Join-Path $postgisRoot.FullName 'share\extension\*') (Join-Path $Stage 'pgsql\share\extension') -Force
 Copy-Item (Join-Path $postgisRoot.FullName 'bin\COPYING') (Join-Path $Stage 'licenses\PostGIS.txt') -Force
+# The GUI came with bin\* above, and it is a directory rather than a file.
+Remove-Item (Join-Path $Stage 'pgsql\bin\postgisgui') -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $postgisTmp -Recurse -Force
 
 # Erlang, without its own VC++ redistributable (see versions.json), and RabbitMQ.
